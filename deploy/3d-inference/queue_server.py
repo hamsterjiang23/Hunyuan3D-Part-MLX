@@ -901,7 +901,7 @@ async def submit_part_task(
     mode: Literal["segment", "generate_parts"] = Query("segment"),
     points: int = Query(100_000, ge=1_000, le=200_000),
     prompts: int = Query(400, ge=1, le=1_000),
-    prompt_batch_size: int = Query(8, ge=1, le=128),
+    prompt_batch_size: int = Query(1, ge=1, le=8),
     surface_points: int = Query(81_920, ge=4_096, le=200_000),
     steps: int = Query(50, ge=1, le=100),
     resolution: Literal[128, 256, 512] = Query(128),

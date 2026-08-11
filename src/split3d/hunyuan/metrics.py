@@ -22,14 +22,16 @@ def instance_miou(predicted_labels: np.ndarray, target_labels: np.ndarray, *, ig
     """PartObjaverse-Tiny instance mIoU used by SAMPart3D/PartField.
 
     Each ground-truth part is matched independently to its best predicted mask;
-    the returned value is a percentage in ``[0, 100]``.
+    the returned value is a percentage in ``[0, 100]``.  The released evaluator
+    skips ``ignore_label`` only in the ground truth; every distinct prediction,
+    including negative labels, remains a candidate mask.
     """
 
     predicted_labels = np.asarray(predicted_labels)
     target_labels = np.asarray(target_labels)
     if predicted_labels.shape != target_labels.shape:
         raise ValueError(f"label shapes differ: {predicted_labels.shape} != {target_labels.shape}")
-    predicted_masks = [predicted_labels == label for label in np.unique(predicted_labels) if label != ignore_label]
+    predicted_masks = [predicted_labels == label for label in np.unique(predicted_labels)]
     best_ious = []
     for label in np.unique(target_labels):
         if label == ignore_label:

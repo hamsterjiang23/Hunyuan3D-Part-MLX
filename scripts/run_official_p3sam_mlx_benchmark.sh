@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-output="artifacts/official_paper_protocol_mlx_200"
+output="artifacts/official_paper_protocol_mlx_200_batch1"
 mkdir -p "$output"
 
 PYTHONUNBUFFERED=1 .venv/bin/python scripts/benchmark_p3sam_partobjaverse.py \
@@ -11,7 +11,7 @@ PYTHONUNBUFFERED=1 .venv/bin/python scripts/benchmark_p3sam_partobjaverse.py \
   --output "$output" \
   --points 100000 \
   --prompts 400 \
-  --prompt-batch-size 8 \
+  --prompt-batch-size 1 \
   --seed 42 \
   --official-fps-start \
   --no-clean-mesh \

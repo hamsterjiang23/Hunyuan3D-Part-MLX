@@ -24,7 +24,7 @@ class P3SAMBackend(Protocol):
         prompts: np.ndarray,
         *,
         iterations: int = 1,
-        prompt_batch_size: int = 32,
+        prompt_batch_size: int = 1,
     ) -> Any: ...
 
 
@@ -221,7 +221,7 @@ def segment_mesh(
     *,
     point_count: int = 100_000,
     prompt_count: int = 400,
-    prompt_batch_size: int = 32,
+    prompt_batch_size: int = 1,
     seed: int = 42,
     prompt_start_index: int | None = None,
     clean_mesh: bool = True,

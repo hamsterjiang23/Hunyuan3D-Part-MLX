@@ -237,7 +237,7 @@ curl -X POST \
 | --- | ---: | --- |
 | `points` | 100000 | 1000–200000 |
 | `prompts` | 400 | 1–1000 |
-| `prompt_batch_size` | 8 | 1–128 |
+| `prompt_batch_size` | 1 | 1–8 |
 | `surface_points` | 81920 | X-Part 条件采样点数 |
 | `steps` | 50 | X-Part 流匹配步数 |
 | `resolution` | 128 | 128、256 或 512 |

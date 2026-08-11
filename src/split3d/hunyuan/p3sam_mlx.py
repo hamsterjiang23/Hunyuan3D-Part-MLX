@@ -84,7 +84,7 @@ class P3SAMMLX:
         prompts: np.ndarray,
         *,
         iterations: int = 1,
-        prompt_batch_size: int = 32,
+        prompt_batch_size: int = 1,
     ) -> P3SAMMasks:
         points_array = mx.array(np.asarray(points, dtype=np.float32))
         prompts_array = mx.array(np.asarray(prompts, dtype=np.float32))
@@ -96,6 +96,10 @@ class P3SAMMLX:
             raise ValueError("iterations must be at least one")
         if prompt_batch_size < 1:
             raise ValueError("prompt_batch_size must be positive")
+        if prompt_batch_size > 8:
+            raise ValueError(
+                "prompt_batch_size above 8 is disabled because MLX 0.32.0 produced batch-dependent masks"
+            )
 
         mask_chunks: list[list[np.ndarray]] = [[], [], []]
         iou_chunks: list[np.ndarray] = []

@@ -20,7 +20,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--points", type=int, default=100_000)
     parser.add_argument("--prompts", type=int, default=400)
-    parser.add_argument("--prompt-batch-size", type=int, default=8)
+    parser.add_argument("--prompt-batch-size", type=int, choices=range(1, 9), default=1)
     parser.add_argument("--surface-points", type=int, default=81_920)
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--resolution", type=int, default=256)

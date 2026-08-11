@@ -36,18 +36,20 @@ P3-SAM 权重路径可单独指定；当前部署使用 `models/p3sam.safetensor
 .venv/bin/python scripts/run_p3sam_mlx.py input.glb \
   --weights models/p3sam.safetensors \
   --output artifacts/p3sam_output \
-  --points 100000 --prompts 400 --prompt-batch-size 8 --seed 42
+  --points 100000 --prompts 400 --prompt-batch-size 1 --seed 42
 
 # X-Part 完整生成
 .venv/bin/python scripts/run_xpart_mlx.py input.glb \
   --model-dir /Users/mt/hamster/models/Hunyuan3D-Part \
   --p3-weights models/p3sam.safetensors \
   --output artifacts/xpart_output \
-  --points 100000 --prompts 400 --prompt-batch-size 8 \
+  --points 100000 --prompts 400 --prompt-batch-size 1 \
   --surface-points 81920 --steps 50 --resolution 128 --seed 42
 ```
 
 P3-SAM 默认启用官方 seeded FPS、mesh cleaning、connectivity 和 `threshold=0.95` 的完整后处理。每次输出包含 `segmented_projected.glb`、`segmented_connectivity.glb`、最终 `segmented.glb`、三阶段 `face_ids*.npy`、AABB 场景以及逐 part GLB。
+
+MLX 默认逐 prompt 解码（`prompt_batch_size=1`）。固定 replay 验证 batch 1 与 batch 8 的二值 mask 和最终逐面标签完全一致，同时内存更低；MLX 0.32.0 的 batch 32 会产生显著不同的 mask，因此公共接口限制为 1–8。
 
 需要 CUDA/MLX 逐阶段对拍时，先用一端生成 `--trace-dir TRACE`，另一端传入 `--replay-manifest TRACE/replay_manifest.npz`；再运行 `scripts/compare_p3sam_traces.py`。追加 `--trace-full-tensors` 会同时保存 Sonata 特征和三头 mask 概率，文件体积较大。
 

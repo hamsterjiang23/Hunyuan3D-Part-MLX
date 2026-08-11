@@ -27,7 +27,7 @@ class PartTaskRequest(BaseModel):
     mode: Literal["segment", "generate_parts"] = "segment"
     points: int = Field(100_000, ge=1_000, le=200_000)
     prompts: int = Field(400, ge=1, le=1_000)
-    prompt_batch_size: int = Field(8, ge=1, le=128)
+    prompt_batch_size: int = Field(1, ge=1, le=8)
     surface_points: int = Field(81_920, ge=4_096, le=200_000)
     steps: int = Field(50, ge=1, le=100)
     resolution: Literal[128, 256, 512] = 128

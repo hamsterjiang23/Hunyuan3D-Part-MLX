@@ -109,7 +109,7 @@ class XPartPipelineMLX:
         *,
         point_count: int = 100_000,
         prompt_count: int = 400,
-        prompt_batch_size: int = 8,
+        prompt_batch_size: int = 1,
         surface_point_count: int = 81_920,
         num_inference_steps: int = 50,
         octree_resolution: int = 256,
