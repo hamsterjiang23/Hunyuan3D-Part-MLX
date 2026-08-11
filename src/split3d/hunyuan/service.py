@@ -287,8 +287,8 @@ class PartJobService:
             primary = self.runner.run(request, mesh_path, output_dir, progress)
             bundle = self._job_dir(uid) / "artifacts.zip"
             with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-                for path in sorted(output_dir.iterdir()):
-                    archive.write(path, arcname=path.name)
+                for path in sorted(candidate for candidate in output_dir.rglob("*") if candidate.is_file()):
+                    archive.write(path, arcname=path.relative_to(output_dir))
             self._write_status(
                 uid,
                 status="completed",

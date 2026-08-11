@@ -1,194 +1,146 @@
-# Hunyuan3D-Part 原生 MLX 移植与 CUDA 对照最终报告
+# Hunyuan3D-Part 完整 MLX 移植与验证报告
 
-日期：2026-08-11。[verified: 本次评测会话日期]
+日期：2026-08-11。[verified: 本次执行环境日期]
 
-目标主机：`mt@10.20.134.22`，Apple M3 Ultra。[verified: Mac `system_profiler` 检查输出]
-
-部署目录：`/Users/mt/hamster/3D_Split`。[verified: SSH 工作目录]
+分支：`codex/official-p3sam-complete-port`。[verified: Mac `git branch --show-current`]
 
 ## 1. 最终结论
 
-Hunyuan3D-Part 公开版的完整链路已经移植为原生 MLX：P3-SAM 从 mesh 产生真实面实例分割与包围盒，X-Part 完成条件编码、PartFormer 50 步流匹配、ShapeVAE 逐 part 解码并导出多 geometry GLB。[verified: `artifacts/xpart_corrected_steps50_r128/runtime.json` 中 `part_count=10`；`src/split3d/hunyuan/` 实现]
+公开发布范围内的 Hunyuan3D-Part 已完成 Apple Silicon 原生 MLX 推理移植：P3-SAM、Conditioner、PartFormer 和 ShapeVAE 均有可执行 MLX 路径，P3-SAM 后接完整公开 `auto_mask.py` 网格拓扑语义，X-Part 可执行 50 步生成并导出独立几何。[verified: `src/split3d/hunyuan/`、`artifacts/xpart_corrected_steps50_r128/runtime.json`]
 
-移植在工程上可运行，但没有复现论文精度。[verified: `artifacts/partobj_full_mlx_corrected/paper_summary.json` 中 `paper_macro_instance_miou=40.4279956415`] MLX 在 PartObjaverse-Tiny 200/200 样本上的论文类别宏平均 mIoU 为 **40.43%**，低于 P3-SAM 论文无 connectivity 的 **59.88%**，差 **19.45 个百分点**。[verified: `artifacts/partobj_full_mlx_corrected/paper_summary.json`；`.upstream/papers/p3-sam.txt:324`]
+P3-SAM 的 MLX 神经网络路径没有导入 PyTorch 或调用 CUDA；PyTorch 只存在于 Windows CUDA 参考脚本中。[verified: `rg "import torch|cuda" src/split3d/hunyuan` 无神经网络命中；`scripts/run_p3sam_cuda_reference.py` 为独立参考实现]
 
-在相同 7 个可完成 CUDA 样本上，CUDA/MLX 平均 mIoU 为 **33.39% / 33.52%**，均值接近；MLX 平均耗时为 CUDA 的 **1.287×**，平均峰值内存为 **2.695×**。[verified: `artifacts/p3sam_corrected_cuda_mlx_selected7_comparison.json` 中 `cuda` 与 `mlx`] 最终面分区并不等价：7 样本平均 ARI 0.7627、NMI 0.8232、对称最佳 mask IoU 0.7384。[verified: `artifacts/p3sam_corrected_cuda_mlx_selected7_comparison.json`]
+工程移植已完成，但不能声称复现论文 `81.14` mIoU。[verified: `.upstream/papers/p3-sam.txt:317-330`；`reports/p3sam-paper-protocol-single-sample.json`] 论文的 connectivity 结果使用每个 GT part 的随机 prompt，公开仓库没有给出对应评测/联合 mask 选择代码；公开 issue #13 也报告 release 结果约为 60% 而不是 81.14。[verified: `.upstream/papers/p3-sam.txt:419-423,961-970`；`reports/p3sam-attention-precision-ab.json` → `official_release_reproduction_issue`]
 
-修正后的 X-Part 50 步全链路耗时 **230.39 秒**，峰值内存 **29.49 GB**；保存的 latents 可在 **48.26 秒**内按官方默认 resolution 512 解码出 10 个 part。[verified: `artifacts/xpart_corrected_steps50_r128/runtime.json`；`artifacts/xpart_corrected_steps50_r512/decode_runtime.json`] 512 输出包含 1,375,230 顶点和 2,624,969 面，无 NaN/Inf 顶点，但并非所有 part 都 watertight。[verified: `artifacts/xpart_corrected_steps50_r512/surface_metrics.json`]
+公开 X-Part 是 light version，不是论文 full checkpoint，因此本移植只能完整复刻公开模型，不能伪造未发布模型的论文指标。[verified: `.upstream/hunyuan3d-part/README.md:39-40`]
 
-最终判定：这套 MLX 部署适合研究、可视化和继续优化，不应被标记为论文精度复现或 production-ready watertight 资产流水线。[opinion]
+## 2. 已移植的真实推理链路
 
-## 2. 环境与权重
+### P3-SAM
 
-| 后端 | 主机与运行时 | 内存 | 证据 |
-|---|---|---:|---|
-| MLX | Apple M3 Ultra，32 CPU 核、80 GPU 核；macOS 26.4，Python 3.12.13，MLX 0.32.0 | 512 GB 统一内存 | [verified: Mac `system_profiler`、`sw_vers`、运行时版本检查] |
-| CUDA | Intel i7-14700KF，RTX 4070；PyTorch 2.8.0+cu128，CUDA 12.8，spconv 2.3.8 | 64 GB RAM，12,282 MiB VRAM | [verified: Windows `nvidia-smi` 与 Python 包版本检查] |
+1. `trimesh.sample.sample_surface` 使用源面索引采样 100,000 个表面点，并保留 float64 归一化和官方 Sonata 数据变换顺序。[verified: `src/split3d/hunyuan/p3sam_pipeline.py:225-341`；`src/split3d/hunyuan/sonata_data.py`]
+2. Sonata、两阶段三头 mask decoder 和 IoU predictor 在 MLX 上执行。[verified: `src/split3d/hunyuan/sonata_mlx.py`；`src/split3d/hunyuan/p3sam_mlx.py`]
+3. 400 个官方 seeded-FPS prompts 产生候选 mask，随后执行公开代码的 IoU 排序、NMS 聚类、稳定候选筛选和未覆盖区域补充。[verified: `src/split3d/hunyuan/p3sam_pipeline.py:105-203,315-341`]
+4. point labels 按源 `face_idx` 投票回原网格，再执行邻接 flood-fill、连通区域拆分、漏分区补齐和累计面积小部件合并。[verified: `src/split3d/hunyuan/p3sam_official_postprocess.py:329-432`]
+5. 输出 projected、connectivity、full-postprocess 三阶段标签、彩色 GLB/PLY、AABB、`parts.json` 和每个 part 的独立 GLB。[verified: `src/split3d/hunyuan/p3sam_pipeline.py:389-473`]
 
-| 权重 | 参数量 | 文件字节数 | 证据 |
+当输入 point labels 相同时，本地 topology 端口与固定官方代码路径逐面一致。[verified: `tests/test_hunyuan_p3sam_official_postprocess.py` 和 pinned topology fixtures]
+
+### X-Part
+
+P3-SAM 的分割和 AABB 进入 MLX Conditioner；PartFormer 执行 flow matching；ShapeVAE 解码每个 part 的 SDF，并通过 Marching Cubes 导出组合场景。[verified: `src/split3d/hunyuan/xpart_pipeline_mlx.py`、`xpart_conditioner_mlx.py`、`xpart_partformer_mlx.py`、`xpart_shapevae_mlx.py`]
+
+已有一次公开 light 权重的完整 50 步单实例运行：10 parts、总耗时 230.3896 秒、峰值统一内存 29.4949 GB。[verified: `artifacts/xpart_corrected_steps50_r128/runtime.json`] 该产物生成于 P3-SAM float64 预处理修复之前，因此证明完整网络和导出链路可运行，但不能作为当前 preprocessing 的最终精度复测。[verified: artifact 时间顺序与后续 float64 修复提交]
+
+## 3. 权重大小
+
+| 模块 | 字节 | 约十进制大小 | 证据 |
 |---|---:|---:|---|
-| P3-SAM | 112,728,649 | 450,968,044 | [verified: safetensors manifest 检查与 `models/Hunyuan3D-Part/p3sam/p3sam.safetensors`] |
-| PartFormer | 3,315,236,672 | 6,630,571,584 | [verified: safetensors manifest 检查与 `models/Hunyuan3D-Part/model/model.safetensors`] |
-| Conditioner | 768,258,114 | 1,755,920,004 | [verified: safetensors manifest 检查与 `models/Hunyuan3D-Part/conditioner/conditioner.safetensors`] |
-| ShapeVAE | 327,746,177 | 655,539,474 | [verified: safetensors manifest 检查与 `models/Hunyuan3D-Part/shapevae/shapevae.safetensors`] |
+| P3-SAM | 450,968,044 | 451 MB | [verified: Mac `stat models/p3sam.safetensors`] |
+| PartFormer | 6,630,571,584 | 6.63 GB | [verified: Mac `stat model/model.safetensors`] |
+| Conditioner | 1,755,920,004 | 1.76 GB | [verified: Mac `stat conditioner/conditioner.safetensors`] |
+| ShapeVAE | 655,539,474 | 656 MB | [verified: Mac `stat shapevae/shapevae.safetensors`] |
+| 合计 | 9,492,999,106 | 9.49 GB / 8.84 GiB | [verified: 上述四个文件之和] |
 
-四份真实 safetensors 合计 9,492,999,106 字节，并均以严格键名/shape 加载。[verified: 上表四个本地文件大小与模型严格加载运行]
+## 4. 固定输入 CUDA / MLX 对齐
 
-## 3. 移植内容
+固定样本为 `00200996b8f34f55a2dd2f44d316d107`，两端重放相同 mesh hash、100,000 sampled points、normals、`face_idx`、400 prompt indices 和 seed 42。[verified: `artifacts/fixed_replay_002_float64/replay_manifest.npz`]
 
-| 官方模块 | 原生 MLX 实现 | 验证 |
-|---|---|---|
-| Sonata PointTransformerV3 | `sonata_data.py`、`sonata_mlx.py`、`sparse.py` | [verified: 20K 点 CUDA/MLX feature 对照产物] |
-| P3-SAM mask 与 IoU heads | `p3sam_mlx.py` | [verified: 200 个真实 mesh 全量运行] |
-| 自动 mask 选择、NMS、bbox | `p3sam_pipeline.py` | [verified: `tests/test_hunyuan_p3sam_pipeline.py` 与端到端产物] |
-| X-Part object/part conditioner | `xpart_conditioner_mlx.py` | [verified: 82K 表面点、4096 condition tokens 全链路运行] |
-| PartFormer DiT + MoE | `xpart_partformer_mlx.py` | [verified: B=1/B=4 CUDA/MLX 数值产物] |
-| ShapeVAE 编解码 | `xpart_shape_mlx.py` | [verified: encoder、latent、SDF 与 resolution 512 解码产物] |
-| 50 步 flow 与 GLB 导出 | `xpart_pipeline_mlx.py` | [verified: `artifacts/xpart_corrected_steps50_r128/runtime.json`] |
+| 后端 | projected mIoU | connectivity mIoU | full mIoU | 推理时间 | 峰值内存 | 证据 |
+|---|---:|---:|---:|---:|---:|---|
+| CUDA FP32 / RTX 4070 | 24.8356 | 31.5899 | 33.2772 | 33.3415 s | 8.1520 GB | [verified: `artifacts/fixed_replay_002_float64/cuda/{stage_metrics,runtime}.json`] |
+| MLX FP32 / Apple GPU | 26.2231 | 35.6017 | 37.5393 | 38.2448 s | 3.5270 GB | [verified: `artifacts/fixed_replay_002_float64/mlx/{stage_metrics,runtime}.json`] |
 
-MLX 神经网络路径没有导入 PyTorch 或调用 CUDA；几何采样、KD-tree、Marching Cubes 和 GLB I/O 使用 NumPy、SciPy、scikit-image 与 trimesh。[verified: `rg "torch|cuda" src/split3d/hunyuan` 仅命中文档字符串；`rg "mlx.core|mlx.nn"` 命中 MLX 模块]
+这个单样本上 MLX full mIoU 高 4.2622 个百分点，但它不能证明总体上 MLX 比 CUDA 更准。[verified: 上表差值；样本数为 1]
 
-GridSample 已修正为官方 NumPy 默认 quicksort；早期 stable sort 会改变 FNV hash tie 中的代表点，曾产生虚假的 99.998% 面标签一致率，因此旧结果未纳入最终结论。[verified: `src/split3d/hunyuan/sonata_data.py` 与官方 transform 输入逐字段对照] 官方 demo 在 GridSample 消耗 RNG 后再随机选择 FPS 起点；`official_fps_start_index` 已复现该顺序，固定起点 0 仅用于跨后端受控对照。[verified: `tests/test_hunyuan_sonata_data.py` 与真实 20K 点起点索引 543]
+CUDA prompt batch 8 改为 4 后，predicted IoU、candidate masks、point labels 和三个 face-label 阶段逐值一致，峰值显存从 8.1520 GB 降至 4.4168 GB。[verified: `artifacts/fixed_replay_002_float64/cuda_bs8_vs_bs4.json`]
 
-## 4. 论文评测协议
+## 5. 注意力精度选择
 
-P3-SAM 指标对每个 GT part 独立寻找最佳预测 mask IoU，对 shape 内 GT parts 求均值，再先按 8 类分别平均、最后做类别宏平均。[verified: `.upstream/PartField/compute_metric.py:19-28,36-92`] 论文在 PartObj-Tiny 报告无 connectivity 59.88、connectivity 81.14、交互式 51.23。[verified: `.upstream/papers/p3-sam.txt:324,327,330`]
+官方 Sonata 将 QKV 转为 FP16 后调用 FlashAttention，再转回模型 dtype。[verified: `.upstream/hunyuan3d-part/XPart/partgen/models/sonata/model.py`]
 
-本报告的 P3 全量配置为 200 个 PartObjaverse-Tiny mesh、100,000 表面点、400 prompts、prompt batch 8、seed 42、无 connectivity、固定 FPS 起点 0。[verified: `artifacts/partobj_full_mlx_corrected/records.jsonl` 共 200 行及运行命令] 另用单样本测试了官方 seeded random FPS 起点，避免把受控 parity 协议伪装为官方随机协议。[verified: `artifacts/p3sam_trueofficialfps_cuda_mlx_comparison.json`]
+MLX 0.32.0 直接 FP16 SDPA 在 20K 点测试中产生 10,240,000 个 NaN feature，因此不能作为生产默认值。[verified: `reports/p3sam-attention-precision-ab.json` → `attention_contract.mlx_direct_fp16_sdpa`]
 
-X-Part 论文使用 CD、F-Score@0.1 与 F-Score@0.05，对象归一化到 `[-1,1]`，测试 0/90/180/270 度并取最佳朝向；论文 part-decomposition 为 0.11/0.80/0.71。[verified: `.upstream/papers/x-part.txt:357-394`] 公开仓库声明发布的是 X-Part light version，不是论文 full version。[verified: `.upstream/hunyuan3d-part/README.md:39-40`]
+五个相同 100K 样本的 CUDA 配对测试中，官方 FP16 attention 比 FP32 的 full mIoU 平均低 1.0717 个百分点；FP16 节省约 3.7346 GB 显存并快约 0.9632 秒。[verified: `reports/p3sam-attention-precision-ab.json` → `paired_cuda_means`]
 
-## 5. P3-SAM 200 样本 MLX 结果
+因此默认保留 FP32 attention；这是基于公开权重和当前 MLX 版本的实测精度选择，不是对论文训练配置的修改。[verified: `reports/p3sam-attention-precision-ab.json` → `default_selected`]
 
-| 类别 | 样本数 | mIoU | 平均秒/样本 | 证据 |
-|---|---:|---:|---:|---|
-| Human-Shape | 29 | 41.0833 | 35.3437 | [verified: `paper_summary.json` → `categories.Human-Shape`] |
-| Animals | 23 | 33.6576 | 35.5326 | [verified: `paper_summary.json` → `categories.Animals`] |
-| Daily-Used | 25 | 47.5863 | 35.3646 | [verified: `paper_summary.json` → `categories.Daily-Used`] |
-| Buildings&&Outdoor | 25 | 32.2072 | 36.4125 | [verified: `paper_summary.json` → `categories.Buildings&&Outdoor`] |
-| Transportations | 38 | 35.1907 | 35.7170 | [verified: `paper_summary.json` → `categories.Transportations`] |
-| Plants | 18 | 43.8456 | 35.6415 | [verified: `paper_summary.json` → `categories.Plants`] |
-| Food | 8 | 43.8215 | 35.7388 | [verified: `paper_summary.json` → `categories.Food`] |
-| Electronics | 34 | 46.0317 | 36.0005 | [verified: `paper_summary.json` → `categories.Electronics`] |
-| **论文类别宏平均** | **200** | **40.4280** | **35.7268** | [verified: `paper_summary.json` → `paper_macro_instance_miou`] |
+## 6. 论文协议边界
 
-shape-micro mIoU 为 40.0125%，平均峰值 MLX 内存为 21.976 GB。[verified: `artifacts/partobj_full_mlx_corrected/paper_summary.json`] 与论文无 connectivity 59.88 相比，类别宏平均低 19.452 个百分点。[verified: 同一 JSON 与 `.upstream/papers/p3-sam.txt:324`]
+论文 PartObj-Tiny 表 2 报告 automatic without-connectivity `59.88`、GT-prompt connectivity `81.14`、interactive `51.23`。[verified: `.upstream/papers/p3-sam.txt:317-330`]
 
-## 6. CUDA 与 MLX 差异
+论文明确说明 connectivity 任务引入 connected components，并为每个真实 part 使用随机 prompt；附录 A.5 只描述从每个 prompt 的三张 mask 中由小到大联合选择，没有发布确定性的 tie-breaking 实现。[verified: `.upstream/papers/p3-sam.txt:419-423,961-970`]
 
-### 相同 7 个 UID 的受控对照
+本项目实现了明确标记为 oracle audit 的可审计重建器，不把它接入自动服务。[verified: `src/split3d/hunyuan/p3sam_paper_protocol.py`；`scripts/benchmark_p3sam_paper_oracle.py`]
 
-CUDA 参考实现受数据相关长尾影响：`02e777bd…` 超过 120 秒、`01fe14f5…` 超过 180 秒仍未产出，因此没有把不完整 CUDA 结果包装成 200 样本统计。[verified: 两次独立 CUDA 运行终止后 `records.jsonl` 未增加] 下表只比较 7 个覆盖 7 类且两端均完成的相同 UID；Plants 不在该集合。[verified: `artifacts/partobj_corrected_cuda_stratified/records.jsonl`]
+固定单样本中，论文描述的 GT-prompt 重建把 full mIoU 从 37.5393 提高到 48.1209，但仍远低于 81.14；一个不使用 GT 的质心 prompt 二次细化反而降到 31.4829，已被移除。[verified: `reports/p3sam-paper-protocol-single-sample.json`]
 
-| 指标 | CUDA | MLX | 差异 | 证据 |
-|---|---:|---:|---:|---|
-| 平均 mIoU | 33.3918 | 33.5199 | MLX +0.1282 点 | [verified: `p3sam_corrected_cuda_mlx_selected7_comparison.json`] |
-| 平均推理耗时 | 27.5776 s | 35.5022 s | MLX 1.287× | [verified: 同一 JSON] |
-| 平均峰值内存 | 8.1520 GB | 21.9758 GB | MLX 2.695× | [verified: 同一 JSON] |
-| 平均 ARI | — | — | 0.7627 | [verified: 同一 JSON] |
-| 平均 NMI | — | — | 0.8232 | [verified: 同一 JSON] |
-| 对称最佳 mask IoU | — | — | 0.7384 | [verified: 同一 JSON] |
+新 automatic benchmark 按用户要求在 147/200 停止；其 full shape-micro 均值为 42.2417，只是按文件名排序的非随机前缀诊断，不得当作论文 200 样本结果。[verified: `artifacts/official_paper_protocol_mlx_200_float64_batch1/summary.json`；`reports/p3sam-paper-protocol-single-sample.json`]
 
-7 个样本的 ARI 从 0.4823 到 0.9968，说明有的形状几乎一致，有的形状差异很大。[verified: `p3sam_corrected_cuda_mlx_selected7_comparison.json` → `samples`] 受控对照的均值质量接近不代表逐面标签等价。[opinion]
+## 7. 真实栏杆模型结果
 
-官方 FPS 起点单样本中，CUDA/MLX mIoU 为 27.6488/35.7263，耗时为 27.9095/36.4227 秒，ARI 为 0.6338。[verified: `artifacts/p3sam_trueofficialfps_cuda_mlx_comparison.json`]
+输入为 `inputs/curved-lantern-balustrade-final.glb`，通过外部 `8080` 队列提交给本机 `8083` MLX worker。[verified: queue task `75bb60f5-72f1-4fb4-8caa-82f68209632a`]
 
-### 数值定位
+任务一次成功，P3-SAM 总耗时 36.5579 秒；服务冷加载计入的 MLX 峰值统一内存为 21.9761 GB。[verified: `artifacts/service_balustrade_75bb60f5/extracted/runtime.json`]
 
-20K 点 Sonata feature 对照为 max abs 0.6315、mean abs 0.006132、RMSE 0.008706、P99 0.02450。[verified: `artifacts/p3sam_corrected_cuda_mlx_comparison.json` → `sonata_feature_comparison_20000_points`] fused/显式 attention、einsum/顺序 SubMConv、手写/fused LayerNorm 三组 A/B 均未缩小误差。[verified: `artifacts/p3sam_features_corrected_mlx_*.npy` 对照记录] P3-SAM 的硬阈值与 NMS 会把 feature 数值漂移放大成不同 partition。[opinion]
+任务 ID、输入/输出哈希、runtime、part 统计、bundle 清单和 API 检查已固化在仓库报告中。[verified: `reports/balustrade-service-validation.json`]
 
-| X-Part 子模块 | 最大绝对误差 | 平均绝对误差 | RMSE | 证据 |
-|---|---:|---:|---:|---|
-| PointCross encoder | 0.0625 | 0.006472 | 0.008611 | [verified: `artifacts/xpart_encoder_*_compare`] |
-| PartFormer B=1 | 0.008789 | 0.002236 | 0.002796 | [verified: `artifacts/xpart_partformer_*_compare`] |
-| PartFormer B=4 | 0.009766 | 0.002136 | 0.002691 | [verified: `artifacts/xpart_partformer_*_compare_p4`] |
-| ShapeVAE latent feature | 3.0 | 0.016821 | 0.026067 | [verified: `artifacts/xpart_shapevae_*_compare_real`] |
-| ShapeVAE SDF | 0.049805 | 0.000227 | 0.002039 | [verified: `artifacts/xpart_shapevae_*_compare_real`] |
+最终网格有 82,468 vertices、164,940 faces、3 parts、0 个未分配面；三个独立 GLB 的 face 数之和等于完整网格 face 数。[verified: `artifacts/service_balustrade_75bb60f5/part_analysis.json` 和 `parts.json`]
 
-ShapeVAE SDF 符号一致率为 99.9756%，但中间 BF16 feature 不是逐 bit 一致。[verified: `artifacts/xpart_shapevae_*_compare_real` 数值对照]
+| part label | faces | 面积占比 | 连通组件数 | 证据 |
+|---:|---:|---:|---:|---|
+| 0 | 135,793 | 80.7758% | 1 | [verified: `part_analysis.json`] |
+| 30 | 22,907 | 14.4548% | 1 | [verified: `part_analysis.json`] |
+| 399 | 6,240 | 4.7694% | 1 | [verified: `part_analysis.json`] |
 
-## 7. X-Part 真实实例与论文表面指标
+![真实栏杆 P3-SAM MLX 分割预览](assets/balustrade-p3sam-mlx-preview.png)
 
-输入为 `00200996b8f34f55a2dd2f44d316d107.glb`；配置为 P3-SAM 100K/400、82K object/part surface points、4096 condition tokens、50 flow steps、10 parts、seed 42。[verified: `artifacts/xpart_corrected_steps50_r128/runtime.json` 与运行命令]
+预览显示左右弯曲扶手被分出，而主体、中央结构和大量细节合并在最大 part；这是明显的真实欠分割，不能仅凭“3 个连通 part”判定语义质量合格。[verified: 上述预览和面积分布]
 
-| 项目 | 结果 | 证据 |
-|---|---:|---|
-| P3-SAM 与 part 采样 | 37.5982 s | [verified: `runtime.json` → `stage_seconds.predict_and_sample_parts`] |
-| Conditioner | 12.4111 s | [verified: `runtime.json` → `stage_seconds.encode_condition`] |
-| 50 步扩散 | 174.1365 s | [verified: `runtime.json` → `stage_seconds.diffusion`] |
-| resolution 128 解码 | 4.8277 s | [verified: `runtime.json` → `stage_seconds.decode_parts`] |
-| 全链路 | 230.3896 s | [verified: `runtime.json` → `total_seconds`] |
-| 全链路峰值内存 | 29.4949 GB | [verified: `runtime.json` → `peak_memory_bytes`] |
-| resolution 512 重解码 | 48.2589 s | [verified: `artifacts/xpart_corrected_steps50_r512/decode_runtime.json`] |
+## 8. X-Part 单实例几何指标
 
-| 分辨率 | 顶点 | 面 | CD↓ | F@0.1↑ | F@0.05↑ | 全部 watertight | 证据 |
-|---|---:|---:|---:|---:|---:|---|---|
-| 128 | 73,754 | 144,477 | 0.011736 | 0.997659 | 0.946388 | 否 | [verified: `artifacts/xpart_corrected_steps50_r128/surface_metrics.json`] |
-| 512 | 1,375,230 | 2,624,969 | 0.009632 | 0.997829 | 0.991922 | 否 | [verified: `artifacts/xpart_corrected_steps50_r512/surface_metrics.json`] |
+旧 50 步产物输入为固定 PartObjaverse 样本，resolution 128 输出 10 个 geometry、73,754 vertices 和 144,477 faces。[verified: `artifacts/xpart_corrected_steps50_r128/{runtime,surface_metrics}.json`]
 
-这里的 CD/F-Score 按论文的归一化与四方向规则计算，但对象是“生成 parts 合并表面”对“输入 mesh”的单样本整体 sanity check。[verified: `scripts/evaluate_xpart_surface.py` → `best_rotated_surface_metrics`] 它不是论文 200 样本、GT part geometry correspondence 的 part-decomposition 指标，不能与论文 0.11/0.80/0.71 直接比较。[opinion]
+合并生成表面对输入 mesh 的 sanity metrics 为 CD `0.011736`、F@0.1 `0.997659`、F@0.05 `0.946388`，且并非全部 watertight。[verified: `artifacts/xpart_corrected_steps50_r128/surface_metrics.json`]
 
-resolution 512 明显减少了 resolution 128 的孔洞与薄片，但预览仍可见 part 交叠、局部缺口和非 watertight 几何。[verified: `artifacts/xpart_corrected_steps50_r512/preview/view_00.png` 与 `surface_metrics.json`] 用于 3D 打印或布尔运算前，应追加 self-intersection、manifold 与 watertight 修复。[opinion]
+这些数值不是论文的 GT part-to-part decomposition 指标，不能与论文数字直接比较。[verified: `scripts/evaluate_xpart_surface.py` 只比较合并表面与输入 mesh]
 
-## 8. Mac 部署与复跑
+## 9. 外部 API 与 agent 可发现性
 
-以下命令已在目标 Mac 的部署目录验证。[verified: 本次 SSH 运行记录]
+`8080` 是持久化外部队列，`8083` 是只监听 localhost 的 MLX worker。[verified: `deploy/3d-inference/start_services.py`]
+
+两个服务的 `/docs` 均返回 HTTP 200，且 `/openapi.json` 可列出以下接口。[verified: 本次 Mac curl/jq 输出]
+
+- Queue：`/submit/part`、`/status/{uid}`、`/download/{uid}`、`/bundle/{uid}`、`/tasks/recent`、`/queue`、`/health`、`/ready`。[verified: `8080/openapi.json`]
+- Worker：`/send`、`/status/{uid}`、`/download/{uid}`、`/bundle/{uid}`、`/tasks/recent`、`/health`、`/unload`。[verified: `8083/openapi.json`]
+
+真实任务验证了 submit → processing → completed → download/bundle 全链路，且 X-Part 没有在 segment 请求中误加载。[verified: task `75bb60f5-...`；worker health `p3sam_loaded=true,xpart_loaded=false`]
+
+artifact ZIP 现在递归包含 `parts/*.glb`，并保留 projected/connectivity/final 三阶段标签和全部可视化。[verified: `src/split3d/hunyuan/service.py` 和新版 bundle 清单]
+
+## 10. 使用方式
 
 ```bash
-ssh mt@10.20.134.22
-cd /Users/mt/hamster/3D_Split
+# 外部队列：真实 P3-SAM 分割
+curl -X POST --data-binary @input.glb \
+  'http://MAC_IP:8080/submit/part?filename=input.glb&mode=segment'
 
-uv sync --extra hunyuan-mlx
+# 查询和下载
+curl http://MAC_IP:8080/status/TASK_UID
+curl http://MAC_IP:8080/download/TASK_UID -o segmented.glb
+curl http://MAC_IP:8080/bundle/TASK_UID -o artifacts.zip
 
-export HF_ENDPOINT=https://hf-mirror.com
-hf download tencent/Hunyuan3D-Part \
-  --local-dir /Users/mt/hamster/models/Hunyuan3D-Part
-
-# P3-SAM 真实分割
-.venv/bin/python scripts/run_p3sam_mlx.py \
-  models/PartObjaverse-Tiny/PartObjaverse-Tiny_mesh/00200996b8f34f55a2dd2f44d316d107.glb \
-  --weights models/p3sam.safetensors \
-  --output artifacts/p3sam_example \
-  --points 100000 --prompts 400 --prompt-batch-size 8 --seed 42
-
-# X-Part 完整 50 步生成
-.venv/bin/python scripts/run_xpart_mlx.py \
-  models/PartObjaverse-Tiny/PartObjaverse-Tiny_mesh/00200996b8f34f55a2dd2f44d316d107.glb \
-  --model-dir /Users/mt/hamster/models/Hunyuan3D-Part \
-  --p3-weights models/p3sam.safetensors \
-  --output artifacts/xpart_output \
-  --points 100000 --prompts 400 --prompt-batch-size 8 \
-  --surface-points 81920 --steps 50 --resolution 128 --seed 42
-
-# 对保存的 latents 按官方默认 resolution 512 重解码
-.venv/bin/python scripts/decode_xpart_latents_mlx.py \
-  models/PartObjaverse-Tiny/PartObjaverse-Tiny_mesh/00200996b8f34f55a2dd2f44d316d107.glb \
-  --latents artifacts/xpart_output/latents.npy \
-  --weights /Users/mt/hamster/models/Hunyuan3D-Part/shapevae/shapevae.safetensors \
-  --output artifacts/xpart_output_r512 --resolution 512
+# Swagger / OpenAPI
+open http://MAC_IP:8080/docs
+curl http://MAC_IP:8080/openapi.json
 ```
 
-如需官方 seeded random FPS 起点，在 P3-SAM 或 X-Part 命令追加 `--official-fps-start`；不追加时固定起点 0，便于跨后端受控比较。[verified: `scripts/run_p3sam_mlx.py`、`scripts/run_xpart_mlx.py` 参数定义]
+## 11. 验收判定
 
-## 9. 限制与上线建议
+- 公开模型范围的 MLX 网络与完整 P3-SAM topology/postprocess 已实现。[verified: 源码、固定 replay、单元测试和真实服务任务]
+- CUDA/MLX 数值差异已用固定输入逐阶段记录，FP32 是当前实测更稳且更准的默认 attention 路径。[verified: `reports/p3sam-attention-precision-ab.json`]
+- 真实外部服务可提交 GLB、查询状态、下载最终 GLB 和完整嵌套 artifact bundle。[verified: task `75bb60f5-...`]
+- 真实栏杆结果存在欠分割，当前公开权重不应被宣传为该领域的 production-quality semantic part segmentation。[verified: 3-part 预览和 80.7758% 最大 part]
+- 论文 81.14 和 X-Part full checkpoint 指标无法由当前公开发布物严格复现。[verified: 论文 GT-prompt 条件、缺失评测代码、公开 light checkpoint]
 
-1. P3-SAM MLX 全量宏平均为 40.43%，不能宣称达到论文 59.88%。[verified: `paper_summary.json` 与论文表 2]
-2. CUDA/MLX 的 7 样本均值 mIoU 接近，但 ARI 只有 0.7627，不能依赖逐面标签完全一致。[verified: `p3sam_corrected_cuda_mlx_selected7_comparison.json`]
-3. connectivity 后处理尚未进入 MLX 主路径；当前结果对应论文无 connectivity 任务，并满足 X-Part bbox 输入链路。[verified: `src/split3d/hunyuan/p3sam_pipeline.py` 与运行配置]
-4. 公布的是 X-Part light version，论文 full-version 数字只能当参考。[verified: `.upstream/hunyuan3d-part/README.md:39-40`]
-5. resolution 512 输出仍非全部 watertight；资产生产前需要几何修复与人工验收。[verified: `xpart_corrected_steps50_r512/surface_metrics.json`]
-6. Tencent Hunyuan 3D-Part Community License 排除欧盟、英国和韩国，分发要求 NOTICE，发布时全产品月活超过 100 万需另行申请授权。[verified: `.upstream/hunyuan3d-part/LICENSE:3,17,23-31`] 上线前应让法务按部署地域、分发方式与规模审核。[opinion]
-
-## 10. 证据与最终产物
-
-- P3 全量论文汇总：`artifacts/partobj_full_mlx_corrected/paper_summary.json`。[verified: 文件存在且 `completed=expected=200`]
-- P3 全量逐样本记录：`artifacts/partobj_full_mlx_corrected/records.jsonl`。[verified: 文件为 200 行]
-- CUDA/MLX 7 样本对照：`artifacts/p3sam_corrected_cuda_mlx_selected7_comparison.json`。[verified: `matched_samples=7`]
-- 官方 FPS 单样本对照：`artifacts/p3sam_trueofficialfps_cuda_mlx_comparison.json`。[verified: `matched_samples=1`]
-- P3 CUDA/MLX 分割预览：`artifacts/p3sam_corrected_cuda_visual/preview/view_00.png` 与 `artifacts/p3sam_corrected_mlx_visual/preview/view_00.png`。[verified: 两个 PNG 已人工查看]
-- X-Part resolution 128 GLB：`artifacts/xpart_corrected_steps50_r128/xpart_scene.glb`。[verified: 文件已从 Mac 下载]
-- X-Part resolution 512 GLB：`artifacts/xpart_corrected_steps50_r512/xpart_scene.glb`。[verified: 文件已从 Mac 下载]
-- X-Part resolution 512 预览：`artifacts/xpart_corrected_steps50_r512/preview/view_00.png`。[verified: PNG 已人工查看]
-- 官方论文：P3-SAM `arXiv:2509.06784`；X-Part `arXiv:2509.08643`。[verified: `.upstream/papers/p3-sam.pdf` 与 `.upstream/papers/x-part.pdf`]
-
-代码质量验证：Ruff 全部通过，Pytest 30 passed、1 skipped；跳过项是条件环境测试。[verified: 最终本地 `ruff check src scripts tests` 与 `pytest -q` 输出]
+要进一步提高栏杆/建筑构件的真实精度，最高价值方向是使用该领域的 part 标注微调 P3-SAM mask/IoU heads，或取得作者未发布的 connectivity 评测与 full X-Part checkpoint。[opinion]

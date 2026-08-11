@@ -1,0 +1,92 @@
+{
+  "task": {
+    "uid": "75bb60f5-72f1-4fb4-8caa-82f68209632a",
+    "status": "completed",
+    "attempts": 1,
+    "mode": "segment",
+    "queue": "http://127.0.0.1:8080",
+    "worker": "http://127.0.0.1:8083"
+  },
+  "hashes": {
+    "input_glb_sha256": "0be9c425a2c3cc2fe7ece2a6fe4c7fa8ef44879d94403e4cdb6f849bc6f891d2",
+    "segmented_glb_sha256": "099905762ce8b8f726be443c4d118716a270d7e50524dfb9d48b984afe1f3f51",
+    "bundle_zip_sha256": "f945539da5a5d332c6da8cb22f7229d79140804d3cbcc9a89e139ed0873e20a1"
+  },
+  "runtime": {
+    "total_seconds": 36.55790654197335,
+    "peak_memory_bytes_including_cold_model_load": 21976083900,
+    "stage_seconds": {
+      "clean_mesh": 0.23068287502974272,
+      "sample_surface": 0.04322137497365475,
+      "extract_features": 1.7768864575773478,
+      "sample_prompts": 0.2627425407990813,
+      "predict_masks": 31.237038124352694,
+      "select_masks": 0.8931510839611292,
+      "official_mesh_postprocess": 1.5924550825729966
+    }
+  },
+  "mesh": {
+    "vertex_count": 82468,
+    "face_count": 164940,
+    "part_count": 3,
+    "unassigned_face_count": 0,
+    "sum_part_faces": 164940,
+    "all_part_glbs_loadable": true
+  },
+  "diagnostics": {
+    "point_count": 100000,
+    "prompt_count": 400,
+    "initial_cluster_count": 213,
+    "stable_cluster_count": 31,
+    "final_part_count": 3,
+    "uncovered_fraction": 0.17731,
+    "projected_part_count": 3,
+    "connectivity_part_count": 3,
+    "postprocessed_part_count": 3
+  },
+  "parts": [
+    {
+      "label": 0,
+      "face_count": 135793,
+      "area_fraction": 0.8077583440408607,
+      "connected_component_count": 1
+    },
+    {
+      "label": 30,
+      "face_count": 22907,
+      "area_fraction": 0.14454773137913765,
+      "connected_component_count": 1
+    },
+    {
+      "label": 399,
+      "face_count": 6240,
+      "area_fraction": 0.04769392458000151,
+      "connected_component_count": 1
+    }
+  ],
+  "bundle_files": [
+    "bboxes.npy",
+    "diagnostics.json",
+    "face_ids.npy",
+    "face_ids_connectivity.npy",
+    "face_ids_projected.npy",
+    "parts/part_000_label_0.glb",
+    "parts/part_001_label_30.glb",
+    "parts/part_002_label_399.glb",
+    "parts.json",
+    "runtime.json",
+    "segmented.glb",
+    "segmented.ply",
+    "segmented_aabb.glb",
+    "segmented_connectivity.glb",
+    "segmented_projected.glb"
+  ],
+  "api_discovery": {
+    "queue_docs_status": 200,
+    "worker_docs_status": 200,
+    "queue_openapi_has_submit_part": true,
+    "worker_openapi_has_send": true
+  },
+  "visual_assessment": "Under-segmented: the two side handrail regions are separated, while the frame, central structure, and most fine details remain merged in the 80.78% main part.",
+  "preview": "reports/assets/balustrade-p3sam-mlx-preview.png"
+}

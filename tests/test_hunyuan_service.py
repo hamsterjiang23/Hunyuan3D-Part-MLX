@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import time
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,9 @@ class FakeRunner:
         primary.write_bytes(b"result-glb")
         np.save(output_dir / "face_ids.npy", np.asarray([0, 1]))
         np.save(output_dir / "bboxes.npy", np.zeros((2, 2, 3)))
+        parts_dir = output_dir / "parts"
+        parts_dir.mkdir()
+        (parts_dir / "part_000.glb").write_bytes(b"part-glb")
         (output_dir / "runtime.json").write_text("{}", encoding="utf-8")
         return primary
 
@@ -69,6 +74,15 @@ def test_part_worker_submit_status_download_and_bundle(tmp_path: Path) -> None:
         bundle = client.get(f"/bundle/{uid}")
         assert bundle.status_code == 200
         assert bundle.headers["content-type"] == "application/zip"
+        with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
+            assert archive.namelist() == [
+                "bboxes.npy",
+                "face_ids.npy",
+                "parts/part_000.glb",
+                "runtime.json",
+                "segmented.glb",
+            ]
+            assert archive.read("parts/part_000.glb") == b"part-glb"
         assert client.get("/health").json()["p3sam_loaded"] is True
         assert client.post("/unload").json() == {"status": "unloaded", "was_loaded": True}
         assert runner.unloaded is True

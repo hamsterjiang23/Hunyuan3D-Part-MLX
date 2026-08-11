@@ -11,7 +11,7 @@ MLX 神经网络路径不依赖 PyTorch/CUDA；P3-SAM 完整路径使用官方�
 
 完整公开权重共 9,492,999,106 字节（约 9.49 GB / 8.84 GiB）：P3-SAM 451 MB、PartFormer 6.63 GB、Conditioner 1.76 GB、ShapeVAE 656 MB。
 
-旧版无 connectivity 基线在 PartObjaverse-Tiny 200 样本上的 P3-SAM MLX 类别宏平均 mIoU 为 40.43%；该数字不能代表当前完整官方后处理路径。当前实现已补齐官方 topology/postprocess 语义，新的 200 样本论文协议结果必须在 Mac 上重新评测后才能声明。
+旧版无 connectivity 基线在 PartObjaverse-Tiny 200 样本上的 P3-SAM MLX 类别宏平均 mIoU 为 40.43%；该数字不能代表当前完整官方后处理路径。当前实现已补齐官方 topology/postprocess 语义；新版 automatic 评测按用户要求在 147/200 停止，该非随机前缀只作诊断，不作为论文指标。
 
 官方 Sonata FlashAttention 会将 QKV 转为 FP16；但 5 个相同 100K 样本的 CUDA A/B 中，该路径比 FP32 平均低 1.07 mIoU，MLX 0.32.0 直接使用 FP16 SDPA 还会产生全 NaN feature，因此默认保留实测更准、更稳定的 FP32 attention。完整误差、耗时和内存数据见 [`reports/p3sam-attention-precision-ab.json`](reports/p3sam-attention-precision-ab.json)。官方仓库的 [PartObjaverse-Tiny 复现 issue #13](https://github.com/Tencent-Hunyuan/Hunyuan3D-Part/issues/13) 也报告公开 `auto_mask.py` 约 60% 而非论文 81.14%，目前没有官方回复；本项目不会把公开 demo 结果误标成论文复现。
 
@@ -111,7 +111,7 @@ uv run pytest -q
 
 ## 已知限制
 
-- 40.43% 是旧版无 connectivity 基线；完整官方后处理版本的 200 样本指标正在重新生成，完成前不能宣称已经达到论文 81.14%。
+- 40.43% 是旧版无 connectivity 基线；新版完整后处理评测已在 147/200 主动停止，不能据此宣称达到论文 81.14%。
 - 官方公开的是 X-Part light version，论文 full-version 数字只能作为参考。
 - MLX 与 CUDA 的浮点和稀疏算子差异会被 mask 阈值与 NMS 放大，均值接近不代表实例标签等价。
 - X-Part 导出的 part 并不保证全部 watertight。
