@@ -163,16 +163,15 @@ def official_fps_start_index(
 ) -> int:
     """Return the FPS start after the official GridSample RNG draw."""
 
-    coord = np.asarray(points, dtype=np.float32).copy()
+    coord = np.asarray(points).copy()
+    if not np.issubdtype(coord.dtype, np.floating):
+        coord = coord.astype(np.float64)
     if coord.ndim != 2 or coord.shape[1] != 3 or len(coord) == 0:
         raise ValueError(f"points must have shape [N, 3] with N > 0, got {coord.shape}")
     minimum = coord.min(axis=0)
     maximum = coord.max(axis=0)
-    coord -= np.asarray(
-        [(minimum[0] + maximum[0]) / 2, (minimum[1] + maximum[1]) / 2, minimum[2]],
-        dtype=np.float32,
-    )
-    grid = np.floor(coord / np.float32(grid_size)).astype(np.int64)
+    coord -= [(minimum[0] + maximum[0]) / 2, (minimum[1] + maximum[1]) / 2, minimum[2]]
+    grid = np.floor(coord / np.asarray(grid_size)).astype(np.int64)
     grid -= grid.min(axis=0)
     keys = fnv_hash(grid)
     _, counts = np.unique(keys[np.argsort(keys)], return_counts=True)
@@ -196,19 +195,17 @@ def prepare_sonata_input(
     reproducible.
     """
 
-    coord = np.asarray(points, dtype=np.float32)
+    coord = np.asarray(points)
+    if not np.issubdtype(coord.dtype, np.floating):
+        coord = coord.astype(np.float64)
     if coord.ndim == 2:
         coord = coord[None, ...]
     if coord.ndim != 3 or coord.shape[-1] != 3:
         raise ValueError(f"points must have shape [N, 3] or [B, N, 3], got {coord.shape}")
     batch_size, points_per_batch, _ = coord.shape
     flat_coord = coord.reshape(-1, 3).copy()
-    flat_normal = (
-        np.ones_like(flat_coord) if normals is None else np.asarray(normals, dtype=np.float32).reshape(-1, 3).copy()
-    )
-    flat_color = (
-        np.ones_like(flat_coord) if colors is None else np.asarray(colors, dtype=np.float32).reshape(-1, 3).copy()
-    )
+    flat_normal = np.ones_like(flat_coord) if normals is None else np.asarray(normals).reshape(-1, 3).copy()
+    flat_color = np.ones_like(flat_coord) if colors is None else np.asarray(colors).reshape(-1, 3).copy()
     if flat_normal.shape != flat_coord.shape or flat_color.shape != flat_coord.shape:
         raise ValueError("normals and colors must match the shape of points")
 
@@ -223,11 +220,12 @@ def prepare_sonata_input(
         batch_coord = flat_coord[start:stop]
         minimum = batch_coord.min(axis=0)
         maximum = batch_coord.max(axis=0)
-        batch_coord -= np.asarray(
-            [(minimum[0] + maximum[0]) / 2, (minimum[1] + maximum[1]) / 2, minimum[2]],
-            dtype=np.float32,
-        )
-        grid = np.floor(batch_coord / np.float32(grid_size)).astype(np.int64)
+        batch_coord -= [
+            (minimum[0] + maximum[0]) / 2,
+            (minimum[1] + maximum[1]) / 2,
+            minimum[2],
+        ]
+        grid = np.floor(batch_coord / np.asarray(grid_size)).astype(np.int64)
         grid -= grid.min(axis=0)
         key = fnv_hash(grid)
         # Match Sonata GridSample exactly: NumPy's default quicksort controls
@@ -247,9 +245,12 @@ def prepare_sonata_input(
         selected_base += len(chosen_local)
 
     selected = np.concatenate(selected_parts)
-    selected_coord = flat_coord[selected]
-    selected_color = flat_color[selected] / np.float32(255.0)
-    selected_normal = flat_normal[selected]
+    # Match the released ToTensor boundary: all NumPy geometry and voxel
+    # selection above uses the incoming floating dtype; tensors become float32
+    # only after representatives have been selected.
+    selected_coord = flat_coord[selected].astype(np.float32, copy=False)
+    selected_color = (flat_color[selected] / 255).astype(np.float32, copy=False)
+    selected_normal = flat_normal[selected].astype(np.float32, copy=False)
     batch = np.repeat(
         np.arange(batch_size, dtype=np.int64),
         [len(part) for part in selected_parts],

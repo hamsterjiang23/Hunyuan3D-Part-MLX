@@ -53,7 +53,14 @@ class MeshSegmentation:
 
 
 def normalize_point_cloud(points: np.ndarray) -> np.ndarray:
-    points = np.asarray(points, dtype=np.float32)
+    # Keep trimesh's float64 surface samples through normalization.  The
+    # released P3-SAM demo computes its bounds in float64, runs Sonata's
+    # CenterShift/GridSample in NumPy, and only casts to float32 in ToTensor.
+    # Casting here changes voxel membership for boundary points and therefore
+    # changes both Sonata representatives and the subsequent random FPS start.
+    points = np.asarray(points)
+    if not np.issubdtype(points.dtype, np.floating):
+        points = points.astype(np.float64)
     minimum = points.min(axis=0)
     maximum = points.max(axis=0)
     center = (maximum + minimum) / 2

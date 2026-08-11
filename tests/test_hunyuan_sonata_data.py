@@ -49,6 +49,26 @@ def test_prepare_sonata_input_is_seeded_and_maps_back_to_original_points() -> No
     np.testing.assert_array_equal(first.inverse, second.inverse)
 
 
+def test_prepare_sonata_input_keeps_float64_until_released_tensor_boundary() -> None:
+    # The third x coordinate is just below a 0.005 voxel boundary in float64,
+    # but rounds onto the boundary if converted to float32 too early.
+    points = np.asarray(
+        [[-1.0, -1.0, 0.0], [1.0, 1.0, 1.0], [0.005 - 1e-10, 0.0, 0.5]],
+        dtype=np.float64,
+    )
+    prepared = prepare_sonata_input(points, grid_size=0.005, seed=42)
+
+    shifted = points.copy()
+    minimum, maximum = shifted.min(axis=0), shifted.max(axis=0)
+    shifted -= [(minimum[0] + maximum[0]) / 2, (minimum[1] + maximum[1]) / 2, minimum[2]]
+    expected_grid = np.floor(shifted / np.asarray(0.005)).astype(np.int64)
+    expected_grid -= expected_grid.min(axis=0)
+
+    np.testing.assert_array_equal(np.sort(prepared.grid_coord[:, 0]), np.sort(expected_grid[:, 0]))
+    assert prepared.coord.dtype == np.float32
+    assert prepared.feat.dtype == np.float32
+
+
 def test_serialization_round_trip_indices() -> None:
     grid = np.asarray([[1, 0, 2], [0, 0, 0], [1, 1, 1], [0, 3, 2]], dtype=np.int64)
     serialized = serialize_points(grid, np.zeros(len(grid), dtype=np.int64))

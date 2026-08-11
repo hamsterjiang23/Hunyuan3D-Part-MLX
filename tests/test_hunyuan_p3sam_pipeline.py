@@ -49,6 +49,13 @@ def test_normalize_point_cloud_fits_minus_one_to_one() -> None:
     np.testing.assert_allclose(normalized, [[-1, -0.5, 0], [1, 0.5, 0]])
 
 
+def test_normalize_point_cloud_preserves_float64_for_official_voxelization() -> None:
+    points = np.asarray([[1e-10, 0, 0], [1.0, 0.5, 0]], dtype=np.float64)
+    normalized = normalize_point_cloud(points)
+
+    assert normalized.dtype == np.float64
+
+
 def test_farthest_point_indices_start_at_zero_and_spread_out() -> None:
     points = np.asarray([[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]], dtype=np.float32)
 
