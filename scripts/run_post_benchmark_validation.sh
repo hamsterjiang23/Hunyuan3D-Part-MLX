@@ -22,6 +22,13 @@ PYTHONPATH=src .venv/bin/python scripts/summarize_p3sam_benchmark.py \
   --metadata models/PartObjaverse-Tiny/PartObjaverse-Tiny_semantic.json \
   --output "$BENCHMARK_ROOT/paper_summary.json"
 
+PYTHONPATH=src .venv/bin/python scripts/audit_p3sam_benchmark.py \
+  --benchmark "$BENCHMARK_ROOT" \
+  --dataset models/PartObjaverse-Tiny \
+  --metadata models/PartObjaverse-Tiny/PartObjaverse-Tiny_semantic.json \
+  --backend mlx \
+  --output "$BENCHMARK_ROOT/audit.json"
+
 SAMPLE_UID=00200996b8f34f55a2dd2f44d316d107
 MESH="models/PartObjaverse-Tiny/PartObjaverse-Tiny_mesh/$SAMPLE_UID.glb"
 TARGET="models/PartObjaverse-Tiny/PartObjaverse-Tiny_instance_gt/$SAMPLE_UID.npy"
