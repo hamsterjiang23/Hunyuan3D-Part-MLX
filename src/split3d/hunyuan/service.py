@@ -33,7 +33,11 @@ class PartTaskRequest(BaseModel):
     resolution: Literal[128, 256, 512] = 128
     sdf_chunk_size: int = Field(100_000, ge=10_000, le=1_000_000)
     seed: int = Field(42, ge=0, le=2**32 - 1)
-    official_fps_start: bool = False
+    official_fps_start: bool = True
+    clean_mesh: bool = True
+    connectivity: bool = True
+    postprocess: bool = True
+    postprocess_threshold: float = Field(0.95, ge=0.0, le=1.0)
 
 
 class PartRunnerProtocol(Protocol):
@@ -117,6 +121,10 @@ class MLXPartRunner:
                     prompt_batch_size=request.prompt_batch_size,
                     seed=request.seed,
                     prompt_start_index=None if request.official_fps_start else 0,
+                    clean_mesh=request.clean_mesh,
+                    connectivity=request.connectivity,
+                    postprocess=request.postprocess,
+                    postprocess_threshold=request.postprocess_threshold,
                     progress=progress,
                 )
                 save_segmentation(mesh, result, output_dir, seed=request.seed)
@@ -141,6 +149,10 @@ class MLXPartRunner:
                     sdf_chunk_size=request.sdf_chunk_size,
                     seed=request.seed,
                     official_fps_start=request.official_fps_start,
+                    clean_mesh=request.clean_mesh,
+                    connectivity=request.connectivity,
+                    postprocess=request.postprocess,
+                    postprocess_threshold=request.postprocess_threshold,
                     progress=progress,
                 )
                 primary = output_dir / "xpart_scene.glb"

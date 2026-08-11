@@ -26,7 +26,11 @@ def main() -> None:
     parser.add_argument("--resolution", type=int, default=256)
     parser.add_argument("--sdf-chunk-size", type=int, default=100_000)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--official-fps-start", action="store_true")
+    parser.add_argument("--official-fps-start", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--clean-mesh", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--connectivity", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--postprocess", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--postprocess-threshold", type=float, default=0.95)
     parser.add_argument("--latents-only", action="store_true")
     args = parser.parse_args()
 
@@ -45,6 +49,10 @@ def main() -> None:
         sdf_chunk_size=args.sdf_chunk_size,
         seed=args.seed,
         official_fps_start=args.official_fps_start,
+        clean_mesh=args.clean_mesh,
+        connectivity=args.connectivity,
+        postprocess=args.postprocess,
+        postprocess_threshold=args.postprocess_threshold,
         output_latents=args.latents_only,
         progress=lambda stage, seconds: print(f"{stage}: {seconds:.3f}s", flush=True),
     )

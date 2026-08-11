@@ -17,7 +17,9 @@ def _reference_select(points: np.ndarray, masks: np.ndarray, scores: np.ndarray)
     for candidate in range(sorted_masks.shape[1]):
         for representative in representatives:
             union = np.logical_or(sorted_masks[:, candidate], sorted_masks[:, representative]).sum()
-            overlap = 1.0 if union == 0 else (
+            # The released scalar implementation yields NaN for two empty
+            # masks, so they remain distinct NMS representatives.
+            overlap = np.nan if union == 0 else (
                 np.logical_and(sorted_masks[:, candidate], sorted_masks[:, representative]).sum() / union
             )
             if overlap > 0.9:

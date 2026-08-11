@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -8,8 +9,8 @@ from time import perf_counter
 from typing import Any, Protocol
 
 import numpy as np
-from scipy.spatial import cKDTree
 
+from split3d.hunyuan.p3sam_official_postprocess import clean_mesh_official, official_mesh_postprocess
 from split3d.hunyuan.sonata_data import official_fps_start_index
 
 
@@ -35,6 +36,9 @@ class SegmentationDiagnostics:
     stable_cluster_count: int
     final_part_count: int
     uncovered_fraction: float
+    projected_part_count: int = 0
+    connectivity_part_count: int = 0
+    postprocessed_part_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,9 @@ class MeshSegmentation:
     bboxes: np.ndarray
     diagnostics: SegmentationDiagnostics
     stage_seconds: dict[str, float] = field(default_factory=dict)
+    mesh: Any | None = None
+    projected_face_ids: np.ndarray | None = None
+    connectivity_face_ids: np.ndarray | None = None
 
 
 def normalize_point_cloud(points: np.ndarray) -> np.ndarray:
@@ -125,7 +132,9 @@ def select_automatic_masks(
             overlaps = np.divide(
                 intersections,
                 unions,
-                out=np.ones(len(representatives), dtype=np.float64),
+                # The released scalar implementation produces NaN for two
+                # empty masks; NaN never passes the >0.9 NMS comparison.
+                out=np.full(len(representatives), np.nan, dtype=np.float64),
                 where=unions != 0,
             )
             matches = np.flatnonzero(overlaps > nms_threshold)
@@ -168,8 +177,10 @@ def select_automatic_masks(
 
     merged.sort(key=lambda index: int(sorted_masks[:, index].sum()), reverse=True)
     point_ids = np.full(len(points), -1, dtype=np.int64)
-    for part_id, representative in enumerate(merged):
-        point_ids[sorted_masks[:, representative]] = part_id
+    # Preserve the released mask IDs (indices after predicted-IoU sorting).
+    # They are intentionally sparse and determine tie-breaking during face votes.
+    for representative in merged:
+        point_ids[sorted_masks[:, representative]] = representative
     diagnostics = SegmentationDiagnostics(
         point_count=len(points),
         prompt_count=masks.shape[1],
@@ -179,32 +190,6 @@ def select_automatic_masks(
         uncovered_fraction=float(np.mean(point_ids < 0)),
     )
     return point_ids, diagnostics
-
-
-def _sample_each_face(mesh: Any, count: int, rng: np.random.Generator) -> np.ndarray:
-    face_count = len(mesh.faces)
-    u = np.sqrt(rng.random((face_count, count, 1)))
-    v = rng.random((face_count, count, 1))
-    weights = np.concatenate([1 - u, u * (1 - v), u * v], axis=-1)
-    vertices = np.asarray(mesh.vertices)[np.asarray(mesh.faces)]
-    return np.sum(vertices[:, None, :, :] * weights[..., None], axis=2)
-
-
-def point_labels_to_faces(
-    mesh: Any,
-    sampled_points: np.ndarray,
-    point_ids: np.ndarray,
-    *,
-    samples_per_face: int = 10,
-    seed: int = 42,
-) -> np.ndarray:
-    valid = point_ids >= 0
-    if not np.any(valid):
-        return np.full(len(mesh.faces), -1, dtype=np.int64)
-    face_points = _sample_each_face(mesh, samples_per_face, np.random.default_rng(seed))
-    nearest = cKDTree(sampled_points[valid]).query(face_points.reshape(-1, 3), workers=-1)[1]
-    nearest_labels = point_ids[valid][nearest].reshape(len(mesh.faces), samples_per_face)
-    return np.asarray([np.bincount(labels).argmax() for labels in nearest_labels], dtype=np.int64)
 
 
 def face_bboxes(mesh: Any, face_ids: np.ndarray) -> np.ndarray:
@@ -217,6 +202,19 @@ def face_bboxes(mesh: Any, face_ids: np.ndarray) -> np.ndarray:
     return np.asarray(boxes, dtype=np.float32)
 
 
+def _mesh_geometry_hash(mesh: Any) -> str:
+    digest = hashlib.sha256()
+    digest.update(np.ascontiguousarray(mesh.vertices).view(np.uint8))
+    digest.update(np.ascontiguousarray(mesh.faces).view(np.uint8))
+    return digest.hexdigest()
+
+
+def _tensor_to_numpy(value: Any) -> np.ndarray:
+    if hasattr(value, "detach"):
+        return value.detach().float().cpu().numpy()
+    return np.asarray(value)
+
+
 def segment_mesh(
     model: P3SAMBackend,
     mesh: Any,
@@ -225,7 +223,14 @@ def segment_mesh(
     prompt_count: int = 400,
     prompt_batch_size: int = 32,
     seed: int = 42,
-    prompt_start_index: int | None = 0,
+    prompt_start_index: int | None = None,
+    clean_mesh: bool = True,
+    connectivity: bool = True,
+    postprocess: bool = True,
+    postprocess_threshold: float = 0.95,
+    replay_manifest: str | Path | None = None,
+    trace_dir: str | Path | None = None,
+    trace_full_tensors: bool = False,
     progress: Callable[[str, float], None] | None = None,
 ) -> MeshSegmentation:
     try:
@@ -242,21 +247,61 @@ def segment_mesh(
         return perf_counter()
 
     stage_started = perf_counter()
-    sampled_points, face_indices = trimesh.sample.sample_surface(mesh, point_count, seed=seed)
-    normalized_points = normalize_point_cloud(sampled_points)
-    normals = np.asarray(mesh.face_normals)[face_indices]
+    processed_mesh = clean_mesh_official(mesh) if clean_mesh else mesh.copy()
+    stage_started = record_stage("clean_mesh", stage_started)
+    geometry_hash = _mesh_geometry_hash(processed_mesh)
+    loaded_prompt_indices: np.ndarray | None = None
+    if replay_manifest is None:
+        sampled_points, face_indices = trimesh.sample.sample_surface(processed_mesh, point_count, seed=seed)
+        normalized_points = normalize_point_cloud(sampled_points)
+        normals = np.asarray(processed_mesh.face_normals)[face_indices]
+    else:
+        with np.load(replay_manifest, allow_pickle=False) as replay:
+            replay_hash = str(replay["mesh_geometry_hash"].item())
+            replay_seed = int(replay["seed"].item())
+            if replay_hash != geometry_hash:
+                raise ValueError("replay manifest mesh geometry does not match the cleaned input mesh")
+            if replay_seed != seed:
+                raise ValueError(f"replay manifest seed is {replay_seed}, requested seed is {seed}")
+            sampled_points = replay["sampled_points"]
+            normalized_points = replay["normalized_points"]
+            normals = replay["normals"]
+            face_indices = replay["face_indices"]
+            loaded_prompt_indices = replay["prompt_indices"]
+        if len(sampled_points) != point_count:
+            raise ValueError(f"replay manifest has {len(sampled_points)} points, requested {point_count}")
+        if len(loaded_prompt_indices) != prompt_count:
+            raise ValueError(f"replay manifest has {len(loaded_prompt_indices)} prompts, requested {prompt_count}")
     stage_started = record_stage("sample_surface", stage_started)
     features = model.extract_features(normalized_points, normals, seed=seed)
     stage_started = record_stage("extract_features", stage_started)
-    if prompt_start_index is None:
-        prompt_start_index = official_fps_start_index(normalized_points, seed=seed)
-    prompt_indices = farthest_point_indices(
-        normalized_points,
-        prompt_count,
-        start_index=prompt_start_index,
-    )
+    if loaded_prompt_indices is not None:
+        prompt_indices = loaded_prompt_indices
+    else:
+        if prompt_start_index is None:
+            prompt_start_index = official_fps_start_index(normalized_points, seed=seed)
+        prompt_indices = farthest_point_indices(
+            normalized_points,
+            prompt_count,
+            start_index=prompt_start_index,
+        )
     prompts = normalized_points[prompt_indices]
     stage_started = record_stage("sample_prompts", stage_started)
+    trace_path = Path(trace_dir) if trace_dir is not None else None
+    if trace_path is not None:
+        trace_path.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            trace_path / "replay_manifest.npz",
+            mesh_geometry_hash=np.asarray(geometry_hash),
+            seed=np.asarray(seed, dtype=np.int64),
+            sampled_points=np.asarray(sampled_points),
+            normalized_points=np.asarray(normalized_points),
+            normals=np.asarray(normals),
+            face_indices=np.asarray(face_indices),
+            prompt_indices=np.asarray(prompt_indices),
+        )
+        if trace_full_tensors:
+            np.save(trace_path / "features.npy", _tensor_to_numpy(features))
     predictions = model.predict_masks(
         features,
         normalized_points,
@@ -272,16 +317,62 @@ def segment_mesh(
         axis=1,
     )
     candidate_iou = iou[np.arange(prompt_count), best_head]
+    if trace_path is not None:
+        np.save(trace_path / "predicted_iou.npy", iou)
+        np.save(trace_path / "candidate_iou.npy", candidate_iou)
+        np.save(trace_path / "candidate_masks.packbits.npy", np.packbits(candidate_masks, axis=0, bitorder="little"))
+        (trace_path / "candidate_masks.json").write_text(
+            json.dumps({"shape": list(candidate_masks.shape), "bitorder": "little"}, indent=2),
+            encoding="utf-8",
+        )
+        if trace_full_tensors:
+            np.save(trace_path / "mask_probabilities.npy", probabilities)
     point_ids, diagnostics = select_automatic_masks(normalized_points, candidate_masks, candidate_iou)
     stage_started = record_stage("select_masks", stage_started)
-    face_ids = point_labels_to_faces(mesh, sampled_points, point_ids, seed=seed)
-    bboxes = face_bboxes(mesh, face_ids)
-    record_stage("project_faces", stage_started)
+    topology = official_mesh_postprocess(
+        processed_mesh,
+        face_indices,
+        point_ids,
+        threshold=postprocess_threshold,
+        postprocess=postprocess,
+    )
+    if not connectivity:
+        face_ids = topology.projected_face_ids
+    elif postprocess:
+        face_ids = topology.final_face_ids
+    else:
+        face_ids = topology.connectivity_face_ids
+    bboxes = face_bboxes(processed_mesh, face_ids)
+    record_stage("official_mesh_postprocess", stage_started)
+    projected_count = int(np.sum(np.unique(topology.projected_face_ids) >= 0))
+    connectivity_count = int(np.sum(np.unique(topology.connectivity_face_ids) >= 0))
+    postprocessed_count = int(np.sum(np.unique(topology.final_face_ids) >= 0))
+    if trace_path is not None:
+        np.save(trace_path / "point_ids.npy", point_ids)
+        np.save(trace_path / "face_ids_projected.npy", topology.projected_face_ids)
+        np.save(trace_path / "face_ids_connectivity.npy", topology.connectivity_face_ids)
+        np.save(trace_path / "face_ids_final.npy", topology.final_face_ids)
+    diagnostics = SegmentationDiagnostics(
+        point_count=diagnostics.point_count,
+        prompt_count=diagnostics.prompt_count,
+        initial_cluster_count=diagnostics.initial_cluster_count,
+        stable_cluster_count=diagnostics.stable_cluster_count,
+        final_part_count=postprocessed_count if connectivity and postprocess else (
+            connectivity_count if connectivity else projected_count
+        ),
+        uncovered_fraction=diagnostics.uncovered_fraction,
+        projected_part_count=projected_count,
+        connectivity_part_count=connectivity_count,
+        postprocessed_part_count=postprocessed_count,
+    )
     return MeshSegmentation(
         face_ids=face_ids,
         bboxes=bboxes,
         diagnostics=diagnostics,
         stage_seconds=stage_seconds,
+        mesh=processed_mesh,
+        projected_face_ids=topology.projected_face_ids,
+        connectivity_face_ids=topology.connectivity_face_ids,
     )
 
 
@@ -297,17 +388,73 @@ def save_segmentation(
 ) -> None:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    import trimesh
+
+    output_mesh = result.mesh if result.mesh is not None else mesh
     rng = np.random.default_rng(seed)
-    colors = rng.integers(32, 256, size=(max(1, result.diagnostics.final_part_count), 3), dtype=np.uint8)
-    face_colors = np.zeros((len(mesh.faces), 4), dtype=np.uint8)
-    face_colors[:, 3] = 255
-    valid = result.face_ids >= 0
-    face_colors[valid, :3] = colors[result.face_ids[valid]]
-    colored = mesh.copy()
-    colored.visual.face_colors = face_colors
-    colored.export(output_dir / "segmented.glb")
+    label_arrays = [result.face_ids]
+    if result.projected_face_ids is not None:
+        label_arrays.append(result.projected_face_ids)
+    if result.connectivity_face_ids is not None:
+        label_arrays.append(result.connectivity_face_ids)
+    labels = sorted(int(label) for label in np.unique(np.concatenate(label_arrays)) if label >= 0)
+    colors = {label: rng.integers(32, 256, size=3, dtype=np.uint8) for label in labels}
+
+    def save_colored(face_ids: np.ndarray, path: Path) -> None:
+        face_colors = np.zeros((len(output_mesh.faces), 4), dtype=np.uint8)
+        face_colors[:, 3] = 255
+        for label, color in colors.items():
+            face_colors[face_ids == label, :3] = color
+        colored = trimesh.Trimesh(
+            vertices=np.asarray(output_mesh.vertices),
+            faces=np.asarray(output_mesh.faces),
+            face_colors=face_colors,
+            process=False,
+        )
+        colored.export(path)
+
+    save_colored(result.face_ids, output_dir / "segmented.glb")
+    save_colored(result.face_ids, output_dir / "segmented.ply")
+    if result.projected_face_ids is not None:
+        save_colored(result.projected_face_ids, output_dir / "segmented_projected.glb")
+        np.save(output_dir / "face_ids_projected.npy", result.projected_face_ids)
+    if result.connectivity_face_ids is not None:
+        save_colored(result.connectivity_face_ids, output_dir / "segmented_connectivity.glb")
+        np.save(output_dir / "face_ids_connectivity.npy", result.connectivity_face_ids)
     np.save(output_dir / "face_ids.npy", result.face_ids)
     np.save(output_dir / "bboxes.npy", result.bboxes)
+    aabb_scene = trimesh.Scene()
+    parts_dir = output_dir / "parts"
+    parts_dir.mkdir(exist_ok=True)
+    part_manifest = []
+    for index, label in enumerate(int(value) for value in np.unique(result.face_ids) if value >= 0):
+        face_indices = np.where(result.face_ids == label)[0]
+        part = output_mesh.submesh([face_indices], append=True, repair=False)
+        part.visual.face_colors = np.tile(np.r_[colors[label], 255], (len(part.faces), 1))
+        filename = f"part_{index:03d}_label_{label}.glb"
+        part.export(parts_dir / filename)
+        points = np.asarray(output_mesh.vertices)[np.asarray(output_mesh.faces)[face_indices].reshape(-1)]
+        minimum, maximum = points.min(axis=0), points.max(axis=0)
+        center, size = (minimum + maximum) / 2, maximum - minimum
+        outline = trimesh.path.creation.box_outline()
+        outline.vertices *= size
+        outline.vertices += center
+        outline.colors = np.tile(np.r_[colors[label], 255], (len(outline.entities), 1)).astype(np.uint8)
+        aabb_scene.add_geometry(outline)
+        part_manifest.append(
+            {
+                "part_index": index,
+                "label": label,
+                "face_count": int(len(face_indices)),
+                "bbox": [minimum.tolist(), maximum.tolist()],
+                "file": f"parts/{filename}",
+            }
+        )
+    aabb_scene.export(output_dir / "segmented_aabb.glb")
+    (output_dir / "parts.json").write_text(
+        json.dumps(part_manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     (output_dir / "diagnostics.json").write_text(
         json.dumps(asdict(result.diagnostics), ensure_ascii=False, indent=2),
         encoding="utf-8",

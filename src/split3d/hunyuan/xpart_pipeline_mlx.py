@@ -115,7 +115,11 @@ class XPartPipelineMLX:
         octree_resolution: int = 256,
         sdf_chunk_size: int = 100_000,
         seed: int = 42,
-        official_fps_start: bool = False,
+        official_fps_start: bool = True,
+        clean_mesh: bool = True,
+        connectivity: bool = True,
+        postprocess: bool = True,
+        postprocess_threshold: float = 0.95,
         output_latents: bool = False,
         progress: Callable[[str, float], None] | None = None,
     ) -> XPartResult:
@@ -145,6 +149,10 @@ class XPartPipelineMLX:
             prompt_batch_size=prompt_batch_size,
             seed=seed,
             prompt_start_index=None if official_fps_start else 0,
+            clean_mesh=clean_mesh,
+            connectivity=connectivity,
+            postprocess=postprocess,
+            postprocess_threshold=postprocess_threshold,
         )
         part_surfaces, bboxes = sample_part_surfaces(
             normalized,

@@ -243,6 +243,10 @@ curl -X POST \
 | `resolution` | 128 | 128、256 或 512 |
 | `sdf_chunk_size` | 100000 | ShapeVAE 解码 chunk |
 | `seed` | 42 | 随机种子 |
-| `official_fps_start` | false | 使用官方 seeded random FPS 起点 |
+| `official_fps_start` | true | 使用官方 seeded random FPS 起点 |
+| `clean_mesh` | true | 执行官方 merge/process mesh cleaning |
+| `connectivity` | true | 启用官方源面投票与连通域修复 |
+| `postprocess` | true | 启用官方累计面积小件合并 |
+| `postprocess_threshold` | 0.95 | 官方累计面积阈值，范围 0–1 |
 
 轮询方式与图生 3D 相同。完成后 `/download/{uid}` 返回主 GLB；Part 任务还会在 `/bundle/{uid}` 返回完整 ZIP，包括标签数组、包围盒、运行统计和 GLB。

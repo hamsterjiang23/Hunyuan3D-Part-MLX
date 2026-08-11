@@ -50,7 +50,11 @@ def part_params(task_id=None, mode="segment"):
         "resolution": 128,
         "sdf_chunk_size": 100_000,
         "seed": 42,
-        "official_fps_start": False,
+        "official_fps_start": True,
+        "clean_mesh": True,
+        "connectivity": True,
+        "postprocess": True,
+        "postprocess_threshold": 0.95,
     }
 
 

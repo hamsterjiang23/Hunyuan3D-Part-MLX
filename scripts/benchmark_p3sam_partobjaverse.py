@@ -31,6 +31,12 @@ def _write_summary(path: Path, records: dict[str, dict[str, Any]]) -> None:
     summary = {
         "completed": len(values),
         "mean_instance_miou": float(np.mean([item["instance_miou"] for item in values])) if values else 0.0,
+        "mean_projected_instance_miou": (
+            float(np.mean([item["projected_instance_miou"] for item in values])) if values else 0.0
+        ),
+        "mean_connectivity_instance_miou": (
+            float(np.mean([item["connectivity_instance_miou"] for item in values])) if values else 0.0
+        ),
         "mean_inference_seconds": (
             float(np.mean([item["inference_seconds"] for item in values])) if values else 0.0
         ),
@@ -54,9 +60,18 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--official-fps-start",
-        action="store_true",
-        help="Match the official demo's seeded random initial FPS point instead of deterministic index 0",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use the official demo's seeded random initial FPS point",
     )
+    parser.add_argument(
+        "--clean-mesh",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Disabled by default because PartObjaverse ground truth indexes the original, uncleaned faces",
+    )
+    parser.add_argument("--postprocess", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--postprocess-threshold", type=float, default=0.95)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--uid", action="append", help="Evaluate only this UID; repeat for multiple shapes")
     parser.add_argument(
@@ -127,6 +142,10 @@ def main() -> None:
                     prompt_batch_size=args.prompt_batch_size,
                     seed=args.seed,
                     prompt_start_index=None if args.official_fps_start else 0,
+                    clean_mesh=args.clean_mesh,
+                    connectivity=True,
+                    postprocess=args.postprocess,
+                    postprocess_threshold=args.postprocess_threshold,
                 )
             runtime.cuda.synchronize()
             peak_memory = int(runtime.cuda.max_memory_allocated())
@@ -139,21 +158,33 @@ def main() -> None:
                 prompt_batch_size=args.prompt_batch_size,
                 seed=args.seed,
                 prompt_start_index=None if args.official_fps_start else 0,
+                clean_mesh=args.clean_mesh,
+                connectivity=True,
+                postprocess=args.postprocess,
+                postprocess_threshold=args.postprocess_threshold,
             )
             peak_memory = int(runtime.get_peak_memory())
         inference_seconds = time.perf_counter() - started
 
         target = np.load(target_path)
         score = instance_miou(result.face_ids, target)
+        if result.projected_face_ids is None or result.connectivity_face_ids is None:
+            raise RuntimeError("official P3-SAM stage outputs are unavailable")
+        projected_score = instance_miou(result.projected_face_ids, target)
+        connectivity_score = instance_miou(result.connectivity_face_ids, target)
         sample_output = args.output / uid
         sample_output.mkdir(parents=True, exist_ok=True)
         np.save(sample_output / "face_ids.npy", result.face_ids)
+        np.save(sample_output / "face_ids_projected.npy", result.projected_face_ids)
+        np.save(sample_output / "face_ids_connectivity.npy", result.connectivity_face_ids)
         if args.save_visuals:
             save_segmentation(mesh, result, sample_output, seed=args.seed)
         record = {
             "uid": uid,
             "backend": args.backend,
             "instance_miou": score,
+            "projected_instance_miou": projected_score,
+            "connectivity_instance_miou": connectivity_score,
             "inference_seconds": inference_seconds,
             "peak_memory_bytes": peak_memory,
             "predicted_parts": result.diagnostics.final_part_count,

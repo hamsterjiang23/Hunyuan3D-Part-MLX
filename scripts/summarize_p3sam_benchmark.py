@@ -43,6 +43,12 @@ def main() -> None:
             "mean_instance_miou": (
                 float(np.mean([item["instance_miou"] for item in values])) if values else None
             ),
+            "mean_projected_instance_miou": (
+                float(np.mean([item["projected_instance_miou"] for item in values])) if values else None
+            ),
+            "mean_connectivity_instance_miou": (
+                float(np.mean([item["connectivity_instance_miou"] for item in values])) if values else None
+            ),
             "mean_inference_seconds": (
                 float(np.mean([item["inference_seconds"] for item in values])) if values else None
             ),
@@ -57,6 +63,16 @@ def main() -> None:
         "expected": sum(len(items) for items in metadata.values()),
         "paper_macro_instance_miou": (
             float(np.mean([item["mean_instance_miou"] for item in complete_categories]))
+            if len(complete_categories) == len(metadata)
+            else None
+        ),
+        "paper_macro_projected_instance_miou": (
+            float(np.mean([item["mean_projected_instance_miou"] for item in complete_categories]))
+            if len(complete_categories) == len(metadata)
+            else None
+        ),
+        "paper_macro_connectivity_instance_miou": (
+            float(np.mean([item["mean_connectivity_instance_miou"] for item in complete_categories]))
             if len(complete_categories) == len(metadata)
             else None
         ),

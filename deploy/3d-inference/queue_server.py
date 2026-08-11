@@ -347,6 +347,10 @@ class QueueManager:
                     "sdf_chunk_size",
                     "seed",
                     "official_fps_start",
+                    "clean_mesh",
+                    "connectivity",
+                    "postprocess",
+                    "postprocess_threshold",
                     "filename",
                 )
                 if key in params
@@ -588,6 +592,10 @@ class QueueManager:
                         "sdf_chunk_size",
                         "seed",
                         "official_fps_start",
+                        "clean_mesh",
+                        "connectivity",
+                        "postprocess",
+                        "postprocess_threshold",
                     )
                     if key in params
                 },
@@ -899,7 +907,11 @@ async def submit_part_task(
     resolution: Literal[128, 256, 512] = Query(128),
     sdf_chunk_size: int = Query(100_000, ge=10_000, le=1_000_000),
     seed: int = Query(42, ge=0, le=2**32 - 1),
-    official_fps_start: bool = Query(False),
+    official_fps_start: bool = Query(True),
+    clean_mesh: bool = Query(True),
+    connectivity: bool = Query(True),
+    postprocess: bool = Query(True),
+    postprocess_threshold: float = Query(0.95, ge=0.0, le=1.0),
 ):
     manager = get_manager()
     content_length = request.headers.get("content-length")
@@ -927,6 +939,10 @@ async def submit_part_task(
         "sdf_chunk_size": sdf_chunk_size,
         "seed": seed,
         "official_fps_start": official_fps_start,
+        "clean_mesh": clean_mesh,
+        "connectivity": connectivity,
+        "postprocess": postprocess,
+        "postprocess_threshold": postprocess_threshold,
     }
     try:
         uid, status, _ = manager.submit_part(raw_mesh, params)

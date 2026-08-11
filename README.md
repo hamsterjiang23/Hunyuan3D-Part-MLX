@@ -5,13 +5,13 @@ Hunyuan3D-Part 的原生 Apple MLX 移植，覆盖两条真实网格推理链路
 - P3-SAM：从 GLB/OBJ 网格预测面实例分割、包围盒和带颜色的分割 GLB。
 - X-Part：P3-SAM → Conditioner → PartFormer → ShapeVAE，生成独立 part geometry 并导出 GLB。
 
-MLX 神经网络路径不依赖 PyTorch/CUDA；网格采样、KD-tree、Marching Cubes 和 GLB I/O 使用 NumPy、SciPy、scikit-image 与 trimesh。
+MLX 神经网络路径不依赖 PyTorch/CUDA；P3-SAM 完整路径使用官方源面投票、邻接 flood-fill、连通域过滤、缺失部件补齐和累计面积后处理，Marching Cubes 与 GLB I/O 使用 NumPy、scikit-image 和 trimesh。
 
 ## 当前状态
 
 完整公开权重共 9,492,999,106 字节（约 9.49 GB / 8.84 GiB）：P3-SAM 451 MB、PartFormer 6.63 GB、Conditioner 1.76 GB、ShapeVAE 656 MB。
 
-移植可以完成真实推理，但不是论文精度的完全复刻。PartObjaverse-Tiny 200 样本的 P3-SAM MLX 类别宏平均 mIoU 为 40.43%，论文无 connectivity 结果为 59.88%。在 CUDA 与 MLX 都能完成的相同 7 个样本上，平均 mIoU 为 33.39% / 33.52%，但平均 ARI 为 0.7627，因此不能认为逐面分区完全一致。
+旧版无 connectivity 基线在 PartObjaverse-Tiny 200 样本上的 P3-SAM MLX 类别宏平均 mIoU 为 40.43%；该数字不能代表当前完整官方后处理路径。当前实现已补齐官方 topology/postprocess 语义，新的 200 样本论文协议结果必须在 Mac 上重新评测后才能声明。
 
 完整方法、硬件、CUDA/MLX 数值差异和逐模块误差见 [移植与评测报告](reports/Hunyuan3D-Part-MLX-port-report.md)。
 
@@ -46,6 +46,10 @@ P3-SAM 权重路径可单独指定；当前部署使用 `models/p3sam.safetensor
   --points 100000 --prompts 400 --prompt-batch-size 8 \
   --surface-points 81920 --steps 50 --resolution 128 --seed 42
 ```
+
+P3-SAM 默认启用官方 seeded FPS、mesh cleaning、connectivity 和 `threshold=0.95` 的完整后处理。每次输出包含 `segmented_projected.glb`、`segmented_connectivity.glb`、最终 `segmented.glb`、三阶段 `face_ids*.npy`、AABB 场景以及逐 part GLB。
+
+需要 CUDA/MLX 逐阶段对拍时，先用一端生成 `--trace-dir TRACE`，另一端传入 `--replay-manifest TRACE/replay_manifest.npz`；再运行 `scripts/compare_p3sam_traces.py`。追加 `--trace-full-tensors` 会同时保存 Sonata 特征和三头 mask 概率，文件体积较大。
 
 ## 本地 MLX worker
 
@@ -101,7 +105,7 @@ uv run pytest -q
 
 ## 已知限制
 
-- 当前主路径未启用论文 connectivity 后处理。
+- 40.43% 是旧版无 connectivity 基线；完整官方后处理版本的 200 样本指标正在重新生成，完成前不能宣称已经达到论文 81.14%。
 - 官方公开的是 X-Part light version，论文 full-version 数字只能作为参考。
 - MLX 与 CUDA 的浮点和稀疏算子差异会被 mask 阈值与 NMS 放大，均值接近不代表实例标签等价。
 - X-Part 导出的 part 并不保证全部 watertight。

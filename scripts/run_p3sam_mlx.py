@@ -22,7 +22,14 @@ def main() -> None:
     parser.add_argument("--prompts", type=int, default=400)
     parser.add_argument("--prompt-batch-size", type=int, default=32)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--official-fps-start", action="store_true")
+    parser.add_argument("--official-fps-start", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--clean-mesh", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--connectivity", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--postprocess", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--postprocess-threshold", type=float, default=0.95)
+    parser.add_argument("--replay-manifest", type=Path)
+    parser.add_argument("--trace-dir", type=Path)
+    parser.add_argument("--trace-full-tensors", action="store_true")
     args = parser.parse_args()
 
     mx.reset_peak_memory()
@@ -39,6 +46,13 @@ def main() -> None:
         prompt_batch_size=args.prompt_batch_size,
         seed=args.seed,
         prompt_start_index=None if args.official_fps_start else 0,
+        clean_mesh=args.clean_mesh,
+        connectivity=args.connectivity,
+        postprocess=args.postprocess,
+        postprocess_threshold=args.postprocess_threshold,
+        replay_manifest=args.replay_manifest,
+        trace_dir=args.trace_dir,
+        trace_full_tensors=args.trace_full_tensors,
         progress=lambda stage, seconds: print(f"{stage}: {seconds:.3f}s", flush=True),
     )
     inference_seconds = time.perf_counter() - inference_started
