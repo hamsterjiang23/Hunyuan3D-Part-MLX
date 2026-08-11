@@ -72,6 +72,12 @@ def main() -> None:
     )
     parser.add_argument("--postprocess", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--postprocess-threshold", type=float, default=0.95)
+    parser.add_argument(
+        "--official-attention-precision",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use released FP16 attention on CUDA or its stable quantization approximation on MLX for an A/B",
+    )
     parser.add_argument("--limit", type=int)
     parser.add_argument("--uid", action="append", help="Evaluate only this UID; repeat for multiple shapes")
     parser.add_argument(
@@ -105,14 +111,20 @@ def main() -> None:
         from run_p3sam_cuda_reference import P3SAMCUDA
         from safetensors.torch import load_file
 
-        model = P3SAMCUDA(args.upstream)
+        model = P3SAMCUDA(
+            args.upstream,
+            official_attention_precision=args.official_attention_precision,
+        )
         model.load_state_dict(load_file(args.weights), strict=True)
         model.cuda().eval()
         runtime = torch_runtime
     else:
         from split3d.hunyuan.p3sam_mlx import P3SAMMLX
 
-        model = P3SAMMLX.from_safetensors(args.weights)
+        model = P3SAMMLX.from_safetensors(
+            args.weights,
+            official_attention_precision=args.official_attention_precision,
+        )
         runtime = importlib.import_module("mlx.core")
 
     args.output.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,71 @@
+{
+  "protocol": {
+    "dataset": "PartObjaverse-Tiny",
+    "matched_uids": 5,
+    "points": 100000,
+    "prompts": 400,
+    "seed": 42,
+    "official_fps_start": true,
+    "clean_mesh": false,
+    "postprocess_threshold": 0.95,
+    "cuda_flashhalf_prompt_batch_size": 4,
+    "cuda_float32_prompt_batch_size": 8
+  },
+  "attention_contract": {
+    "released_sonata": "QKV is cast to FP16 for FlashAttention and the result is cast back to FP32",
+    "mlx_direct_fp16_sdpa": "all 10240000 output feature values were NaN with MLX 0.32.0",
+    "default_selected": "float32",
+    "selection_reason": "higher paired five-sample full-postprocess instance mIoU, finite MLX output, and lower cross-backend feature error"
+  },
+  "paired_cuda_means": {
+    "full_postprocess_instance_miou": {
+      "flashhalf": 37.42723017545483,
+      "float32": 38.498882386073184,
+      "flashhalf_minus_float32": -1.071652210618349
+    },
+    "projected_instance_miou": {
+      "flashhalf": 33.770519288013745,
+      "float32": 34.47595861996039,
+      "flashhalf_minus_float32": -0.7054393319466434
+    },
+    "connectivity_instance_miou": {
+      "flashhalf": 37.22099464705118,
+      "float32": 38.133244191196745,
+      "flashhalf_minus_float32": -0.9122495441455684
+    },
+    "inference_seconds": {
+      "flashhalf": 30.015123780001886,
+      "float32": 30.978337399999145,
+      "flashhalf_minus_float32": -0.9632136199972592
+    },
+    "peak_memory_bytes": {
+      "flashhalf": 4417434931.2,
+      "float32": 8152007680.0,
+      "flashhalf_minus_float32": -3734572748.8
+    }
+  },
+  "feature_ab_20000_points": {
+    "cuda_flashhalf_vs_cuda_float32": {
+      "max_abs": 0.09242749214172363,
+      "mean_abs": 0.0053864237396202795,
+      "rmse": 0.007111825395742408,
+      "p99_abs": 0.02109319005161523
+    },
+    "cuda_float32_vs_mlx_float32": {
+      "mean_abs": 0.0059354131519654945,
+      "rmse": 0.008472629142530016,
+      "p99_abs": 0.02376386538147926
+    },
+    "cuda_flashhalf_vs_mlx_float32": {
+      "mean_abs": 0.007493577001931976,
+      "rmse": 0.010367702520878559,
+      "p99_abs": 0.029833980128169055
+    },
+    "cuda_flashhalf_vs_mlx_fp16_quantized_fp32_sdpa": {
+      "mean_abs": 0.008540744228149055,
+      "rmse": 0.011643834747732148,
+      "p99_abs": 0.03365997247397899
+    }
+  },
+  "official_release_reproduction_issue": "https://github.com/Tencent-Hunyuan/Hunyuan3D-Part/issues/13"
+}

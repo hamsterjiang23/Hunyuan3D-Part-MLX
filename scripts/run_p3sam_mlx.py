@@ -30,11 +30,20 @@ def main() -> None:
     parser.add_argument("--replay-manifest", type=Path)
     parser.add_argument("--trace-dir", type=Path)
     parser.add_argument("--trace-full-tensors", action="store_true")
+    parser.add_argument(
+        "--official-attention-precision",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Experiment with FP16 QKV quantization and stable FP32 SDPA instead of the higher-scoring FP32 path",
+    )
     args = parser.parse_args()
 
     mx.reset_peak_memory()
     started = time.perf_counter()
-    model = P3SAMMLX.from_safetensors(args.weights)
+    model = P3SAMMLX.from_safetensors(
+        args.weights,
+        official_attention_precision=args.official_attention_precision,
+    )
     load_seconds = time.perf_counter() - started
     mesh = trimesh.load(args.mesh, force="mesh")
     inference_started = time.perf_counter()

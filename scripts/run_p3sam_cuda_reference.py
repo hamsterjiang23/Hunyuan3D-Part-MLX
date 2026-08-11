@@ -30,6 +30,59 @@ def _install_torch_scatter_fallback() -> None:
     sys.modules["torch_scatter"] = module
 
 
+def _install_flash_attn_fallback() -> None:
+    """Expose the released FP16 attention contract through PyTorch SDPA.
+
+    The official Sonata path always casts packed QKV to FP16 before calling
+    ``flash_attn_varlen_qkvpacked_func`` and casts its result back to the
+    surrounding FP32 model.  FlashAttention is not available on the Windows
+    CUDA reference host, but PyTorch SDPA provides the same dtype boundary and
+    selects an accelerated attention kernel when the device supports it.
+    """
+
+    module = types.ModuleType("flash_attn")
+
+    def flash_attn_varlen_qkvpacked_func(
+        qkv: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        max_seqlen: int,
+        dropout_p: float = 0.0,
+        softmax_scale: float | None = None,
+        **_: object,
+    ) -> torch.Tensor:
+        boundaries = cu_seqlens.detach().cpu().tolist()
+        lengths = np.diff(boundaries)
+        chunks: list[torch.Tensor | None] = [None] * len(lengths)
+        for length in np.unique(lengths):
+            sequence_indices = np.flatnonzero(lengths == length)
+            packed = torch.stack(
+                [qkv[boundaries[index] : boundaries[index + 1]] for index in sequence_indices],
+                dim=0,
+            )
+            query = packed[:, :, 0].permute(0, 2, 1, 3)
+            key = packed[:, :, 1].permute(0, 2, 1, 3)
+            value = packed[:, :, 2].permute(0, 2, 1, 3)
+            attended = torch.nn.functional.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                dropout_p=dropout_p,
+                scale=softmax_scale,
+            )
+            attended = attended.permute(0, 2, 1, 3)
+            for output_index, sequence_index in enumerate(sequence_indices):
+                chunks[int(sequence_index)] = attended[output_index]
+        if any(chunk is None for chunk in chunks):
+            raise RuntimeError("variable-length attention omitted an input sequence")
+        result = torch.cat([chunk for chunk in chunks if chunk is not None], dim=0)
+        if result.shape[0] != qkv.shape[0] or max_seqlen <= 0:
+            raise RuntimeError("invalid variable-length attention output")
+        return result
+
+    module.flash_attn_varlen_qkvpacked_func = flash_attn_varlen_qkvpacked_func  # type: ignore[attr-defined]
+    sys.modules["flash_attn"] = module
+
+
 def _mlp(*channels: int) -> nn.Sequential:
     modules: list[nn.Module] = []
     for index, (input_channels, output_channels) in enumerate(zip(channels[:-1], channels[1:], strict=True)):
@@ -40,15 +93,17 @@ def _mlp(*channels: int) -> nn.Sequential:
 
 
 class P3SAMCUDA(nn.Module):
-    def __init__(self, upstream_root: Path) -> None:
+    def __init__(self, upstream_root: Path, *, official_attention_precision: bool = False) -> None:
         super().__init__()
         _install_torch_scatter_fallback()
+        if official_attention_precision:
+            _install_flash_attn_fallback()
         partgen = upstream_root / "XPart" / "partgen"
         sys.path.insert(0, str(partgen))
         from models.sonata.model import PointTransformerV3
 
         config = json.loads((partgen / "config" / "sonata.json").read_text(encoding="utf-8"))
-        config["enable_flash"] = False
+        config["enable_flash"] = official_attention_precision
         config["shuffle_orders"] = True
         self.sonata = PointTransformerV3(**config)
         import spconv.pytorch as spconv
@@ -168,13 +223,19 @@ def main() -> None:
     parser.add_argument("--replay-manifest", type=Path)
     parser.add_argument("--trace-dir", type=Path)
     parser.add_argument("--trace-full-tensors", action="store_true")
+    parser.add_argument(
+        "--official-attention-precision",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Match the release's FP16 QKV attention boundary",
+    )
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
     torch.cuda.reset_peak_memory_stats()
     started = time.perf_counter()
-    model = P3SAMCUDA(args.upstream)
+    model = P3SAMCUDA(args.upstream, official_attention_precision=args.official_attention_precision)
     model.load_state_dict(load_file(args.weights), strict=True)
     model.cuda().eval()
     load_seconds = time.perf_counter() - started

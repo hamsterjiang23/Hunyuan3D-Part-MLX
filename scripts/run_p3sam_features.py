@@ -21,6 +21,12 @@ def main() -> None:
     parser.add_argument("--upstream", type=Path, default=Path(".upstream/hunyuan3d-part"))
     parser.add_argument("--points", type=int, default=20_000)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--official-attention-precision",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use the released FP16 attention contract on CUDA or its stable quantization approximation on MLX",
+    )
     args = parser.parse_args()
 
     model: Any
@@ -30,7 +36,7 @@ def main() -> None:
         from run_p3sam_cuda_reference import P3SAMCUDA
         from safetensors.torch import load_file
 
-        model = P3SAMCUDA(args.upstream)
+        model = P3SAMCUDA(args.upstream, official_attention_precision=args.official_attention_precision)
         model.load_state_dict(load_file(args.weights), strict=True)
         model.cuda().eval()
         runtime = torch_runtime
@@ -39,7 +45,10 @@ def main() -> None:
 
         from split3d.hunyuan.p3sam_mlx import P3SAMMLX
 
-        model = P3SAMMLX.from_safetensors(args.weights)
+        model = P3SAMMLX.from_safetensors(
+            args.weights,
+            official_attention_precision=args.official_attention_precision,
+        )
         runtime = mlx_runtime
 
     mesh = trimesh.load(args.mesh, force="mesh")

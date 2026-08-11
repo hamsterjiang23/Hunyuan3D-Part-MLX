@@ -50,9 +50,13 @@ class P3SAMMasks:
 class P3SAMMLX:
     """Native MLX P3-SAM encoder and point-promptable mask decoder."""
 
-    def __init__(self, weights: dict[str, Any]) -> None:
+    def __init__(self, weights: dict[str, Any], *, official_attention_precision: bool = False) -> None:
         _require_mlx()
-        self.feature_extractor = SonataFeatureExtractorMLX(weights, prefix="")
+        self.feature_extractor = SonataFeatureExtractorMLX(
+            weights,
+            prefix="",
+            official_attention_precision=official_attention_precision,
+        )
         self.stage1 = tuple(MLPMLX(weights, f"seg_mlp_{index}") for index in (1, 2, 3))
         self.stage2_global = MLPMLX(weights, "seg_s2_mlp_g")
         self.stage2 = tuple(MLPMLX(weights, f"seg_s2_mlp_{index}") for index in (1, 2, 3))
@@ -60,12 +64,20 @@ class P3SAMMLX:
         self.iou_out = MLPMLX(weights, "iou_mlp_out")
 
     @classmethod
-    def from_safetensors(cls, path: str | Path) -> P3SAMMLX:
+    def from_safetensors(
+        cls,
+        path: str | Path,
+        *,
+        official_attention_precision: bool = False,
+    ) -> P3SAMMLX:
         _require_mlx()
         path = Path(path)
         if not path.is_file():
             raise FileNotFoundError(path)
-        return cls(mx.load(str(path)))
+        return cls(
+            mx.load(str(path)),
+            official_attention_precision=official_attention_precision,
+        )
 
     def extract_features(
         self,

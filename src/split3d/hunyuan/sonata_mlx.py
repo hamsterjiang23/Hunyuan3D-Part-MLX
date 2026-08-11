@@ -94,7 +94,16 @@ def _gelu(x: Any) -> Any:
 
 
 class SerializedAttentionMLX:
-    def __init__(self, weights: dict[str, Any], prefix: str, channels: int, heads: int, order_index: int) -> None:
+    def __init__(
+        self,
+        weights: dict[str, Any],
+        prefix: str,
+        channels: int,
+        heads: int,
+        order_index: int,
+        *,
+        official_attention_precision: bool = False,
+    ) -> None:
         self.channels = channels
         self.heads = heads
         self.order_index = order_index
@@ -103,6 +112,7 @@ class SerializedAttentionMLX:
         self.qkv_bias = weights[f"{prefix}.qkv.bias"]
         self.proj_weight = weights[f"{prefix}.proj.weight"]
         self.proj_bias = weights[f"{prefix}.proj.bias"]
+        self.official_attention_precision = official_attention_precision
 
     def __call__(self, point: SonataPointMLX, patch_size: int = 1024) -> Any:
         pad, unpad, boundaries = attention_padding_maps(point.offset, patch_size)
@@ -110,6 +120,14 @@ class SerializedAttentionMLX:
         ordered_point_indices = rank_order[pad]
         qkv = _linear(point.feat, self.qkv_weight, self.qkv_bias)
         qkv = mx.take(qkv, mx.array(ordered_point_indices, dtype=mx.int32), axis=0)
+        output_dtype = qkv.dtype
+        # Approximate the released Sonata FlashAttention dtype boundary by
+        # quantizing packed QKV through FP16.  MLX 0.32.0 FP16 SDPA produces
+        # all-NaN features for this network, so attention itself runs in FP32
+        # after quantization and is cast to the surrounding model dtype before
+        # the output projection.
+        if self.official_attention_precision:
+            qkv = qkv.astype(mx.float16).astype(mx.float32)
         qkv = qkv.reshape(-1, 3, self.heads, self.channels // self.heads)
         chunks = []
         for start, stop in zip(boundaries[:-1], boundaries[1:], strict=True):
@@ -119,14 +137,23 @@ class SerializedAttentionMLX:
             v = packed[:, 2].transpose(1, 0, 2)[None]
             attended = mx.fast.scaled_dot_product_attention(q, k, v, scale=self.scale)
             chunks.append(attended[0].transpose(1, 0, 2).reshape(int(stop - start), self.channels))
-        ordered_output = mx.concatenate(chunks, axis=0)
+        ordered_output = mx.concatenate(chunks, axis=0).astype(output_dtype)
         inverse = unpad[point.serialized.inverse[self.order_index]]
         output = mx.take(ordered_output, mx.array(inverse, dtype=mx.int32), axis=0)
         return _linear(output, self.proj_weight, self.proj_bias)
 
 
 class SonataBlockMLX:
-    def __init__(self, weights: dict[str, Any], prefix: str, channels: int, heads: int, order_index: int) -> None:
+    def __init__(
+        self,
+        weights: dict[str, Any],
+        prefix: str,
+        channels: int,
+        heads: int,
+        order_index: int,
+        *,
+        official_attention_precision: bool = False,
+    ) -> None:
         self.cpe_conv = SubMConv3dMLX(channels, channels, kernel_size=3, bias=True)
         self.cpe_conv.weight = weights[f"{prefix}.cpe.0.weight"]
         self.cpe_conv.bias = weights[f"{prefix}.cpe.0.bias"]
@@ -138,7 +165,14 @@ class SonataBlockMLX:
         self.norm1_bias = weights[f"{prefix}.norm1.0.bias"]
         self.norm2_weight = weights[f"{prefix}.norm2.0.weight"]
         self.norm2_bias = weights[f"{prefix}.norm2.0.bias"]
-        self.attention = SerializedAttentionMLX(weights, f"{prefix}.attn", channels, heads, order_index)
+        self.attention = SerializedAttentionMLX(
+            weights,
+            f"{prefix}.attn",
+            channels,
+            heads,
+            order_index,
+            official_attention_precision=official_attention_precision,
+        )
         self.mlp_fc1_weight = weights[f"{prefix}.mlp.0.fc1.weight"]
         self.mlp_fc1_bias = weights[f"{prefix}.mlp.0.fc1.bias"]
         self.mlp_fc2_weight = weights[f"{prefix}.mlp.0.fc2.weight"]
@@ -217,7 +251,13 @@ class GridPoolingMLX:
 class SonataFeatureExtractorMLX:
     """Native MLX port of the released encoder-only Sonata feature extractor."""
 
-    def __init__(self, weights: dict[str, Any], prefix: str = "seg_feat_encoder") -> None:
+    def __init__(
+        self,
+        weights: dict[str, Any],
+        prefix: str = "seg_feat_encoder",
+        *,
+        official_attention_precision: bool = False,
+    ) -> None:
         _require_mlx()
         root = f"{prefix}." if prefix else ""
         sonata = f"{root}sonata"
@@ -230,7 +270,14 @@ class SonataFeatureExtractorMLX:
             stage_prefix = f"{sonata}.enc.enc{stage}"
             pooling = GridPoolingMLX(weights, f"{stage_prefix}.down") if stage else None
             blocks = [
-                SonataBlockMLX(weights, f"{stage_prefix}.block{block}", channels, heads, block % 4)
+                SonataBlockMLX(
+                    weights,
+                    f"{stage_prefix}.block{block}",
+                    channels,
+                    heads,
+                    block % 4,
+                    official_attention_precision=official_attention_precision,
+                )
                 for block in range(depth)
             ]
             self.stages.append((pooling, blocks))
@@ -242,6 +289,8 @@ class SonataFeatureExtractorMLX:
         cls,
         path: str | Path,
         prefix: str = "seg_feat_encoder",
+        *,
+        official_attention_precision: bool = False,
     ) -> SonataFeatureExtractorMLX:
         _require_mlx()
         path = Path(path)
@@ -251,7 +300,11 @@ class SonataFeatureExtractorMLX:
         selected = {key: value for key, value in weights.items() if key.startswith(f"{prefix}.")} if prefix else weights
         if not selected:
             raise ValueError(f"no tensors with prefix {prefix!r} in {path}")
-        return cls(selected, prefix=prefix)
+        return cls(
+            selected,
+            prefix=prefix,
+            official_attention_precision=official_attention_precision,
+        )
 
     def __call__(
         self,

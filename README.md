@@ -13,6 +13,8 @@ MLX 神经网络路径不依赖 PyTorch/CUDA；P3-SAM 完整路径使用官方�
 
 旧版无 connectivity 基线在 PartObjaverse-Tiny 200 样本上的 P3-SAM MLX 类别宏平均 mIoU 为 40.43%；该数字不能代表当前完整官方后处理路径。当前实现已补齐官方 topology/postprocess 语义，新的 200 样本论文协议结果必须在 Mac 上重新评测后才能声明。
 
+官方 Sonata FlashAttention 会将 QKV 转为 FP16；但 5 个相同 100K 样本的 CUDA A/B 中，该路径比 FP32 平均低 1.07 mIoU，MLX 0.32.0 直接使用 FP16 SDPA 还会产生全 NaN feature，因此默认保留实测更准、更稳定的 FP32 attention。完整误差、耗时和内存数据见 [`reports/p3sam-attention-precision-ab.json`](reports/p3sam-attention-precision-ab.json)。官方仓库的 [PartObjaverse-Tiny 复现 issue #13](https://github.com/Tencent-Hunyuan/Hunyuan3D-Part/issues/13) 也报告公开 `auto_mask.py` 约 60% 而非论文 81.14%，目前没有官方回复；本项目不会把公开 demo 结果误标成论文复现。
+
 完整方法、硬件、CUDA/MLX 数值差异和逐模块误差见 [移植与评测报告](reports/Hunyuan3D-Part-MLX-port-report.md)。
 
 ## 安装
