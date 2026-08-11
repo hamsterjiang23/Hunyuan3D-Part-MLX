@@ -1,35 +1,105 @@
-# split3d
+# Hunyuan3D-Part-MLX
 
-`split3d` 面向游戏开发，把 AI 生成的单体网格按少量语义名称拆成独立资产，例如把马拆成 `head`、`body`、`legs`、`tail`。它不生成 LOD、碰撞体、打印结构或隐藏内部几何。
+Hunyuan3D-Part 的原生 Apple MLX 移植，覆盖两条真实网格推理链路：
 
-当前实现包含：
+- P3-SAM：从 GLB/OBJ 网格预测面实例分割、包围盒和带颜色的分割 GLB。
+- X-Part：P3-SAM → Conditioner → PartFormer → ShapeVAE，生成独立 part geometry 并导出 GLB。
 
-- GLB、GLTF、OBJ 读取与网格预检；
-- 固定多视角 RGB 与逐像素三角面 ID 渲染；
-- Grounding DINO 文字部件检测；
-- SAM2 检测框分割；
-- 2D mask 回投到源三角面、邻接补全和小区域清理；
-- 每个语义按相对规模保留主要连通区域，小于该语义 10% 的碎片自动并回相邻部件；
-- 每个语义名称导出一个节点的 `split.glb`，并可同时导出各部件 GLB；
-- `parts.json`、`face_labels.npy`、`face_scores.npy`、检测记录，以及每个子部件各自的原贴图颜色渲染图。
+MLX 神经网络路径不依赖 PyTorch/CUDA；网格采样、KD-tree、Marching Cubes 和 GLB I/O 使用 NumPy、SciPy、scikit-image 与 trimesh。
 
-## 快速开始
+## 当前状态
 
-```powershell
-uv sync --extra dev --extra vision
-uv run split3d inspect model.glb
-uv run split3d render model.glb --output views --views 12 --resolution 512
-uv run split3d auto horse.glb --parts "head,body,legs,tail" --output output
+完整公开权重共 9,492,999,106 字节（约 9.49 GB / 8.84 GiB）：P3-SAM 451 MB、PartFormer 6.63 GB、Conditioner 1.76 GB、ShapeVAE 656 MB。
+
+移植可以完成真实推理，但不是论文精度的完全复刻。PartObjaverse-Tiny 200 样本的 P3-SAM MLX 类别宏平均 mIoU 为 40.43%，论文无 connectivity 结果为 59.88%。在 CUDA 与 MLX 都能完成的相同 7 个样本上，平均 mIoU 为 33.39% / 33.52%，但平均 ARI 为 0.7627，因此不能认为逐面分区完全一致。
+
+完整方法、硬件、CUDA/MLX 数值差异和逐模块误差见 [移植与评测报告](reports/Hunyuan3D-Part-MLX-port-report.md)。
+
+## 安装
+
+要求 Apple Silicon Mac、Python 3.11/3.12 和足够的统一内存。
+
+```bash
+uv sync --extra hunyuan-mlx --extra service --extra dev
+
+export HF_ENDPOINT=https://hf-mirror.com
+hf download tencent/Hunyuan3D-Part \
+  --local-dir /Users/mt/hamster/models/Hunyuan3D-Part
 ```
 
-默认从 Hugging Face 本地缓存读取 `IDEA-Research/grounding-dino-base`，并从 `models/sam2-hiera-tiny/` 读取 SAM2 tiny。只有显式添加 `--allow-download` 才允许模型库联网。
+P3-SAM 权重路径可单独指定；当前部署使用 `models/p3sam.safetensors`。
 
-自动结果是可编辑的粗分资产，不保证直接达到最终美术质量。先查看 `renders/` 中每个部件独立的真实颜色图片；如需手工修正，可编辑 `face_labels.npy` 后重新导出：
+## 命令行推理
 
-```powershell
-uv run split3d split horse.glb --face-labels labels.npy --parts "head,body,legs,tail" --output output
+```bash
+# P3-SAM 面实例分割
+.venv/bin/python scripts/run_p3sam_mlx.py input.glb \
+  --weights models/p3sam.safetensors \
+  --output artifacts/p3sam_output \
+  --points 100000 --prompts 400 --prompt-batch-size 8 --seed 42
+
+# X-Part 完整生成
+.venv/bin/python scripts/run_xpart_mlx.py input.glb \
+  --model-dir /Users/mt/hamster/models/Hunyuan3D-Part \
+  --p3-weights models/p3sam.safetensors \
+  --output artifacts/xpart_output \
+  --points 100000 --prompts 400 --prompt-batch-size 8 \
+  --surface-points 81920 --steps 50 --resolution 128 --seed 42
 ```
 
-`labels.npy` 是长度等于三角面数量的一维整数数组。`0,1,2,3` 分别对应 `--parts` 中的名称，`-1` 表示未标注并由网格邻接传播补齐。同一标签即使包含多个不相连区域，也会合并为一个游戏资产节点。
+## 本地 MLX worker
 
-当前不直接读取 FBX；先在 Blender 中转换为 GLB。导出的切口保持开放，不做封口。
+worker 默认只监听 `127.0.0.1:8083`，输入路径必须位于统一队列的 input root 内；模型按需加载，并提供显存/统一内存卸载接口。
+
+```bash
+.venv/bin/python scripts/serve_hunyuan_part_mlx.py \
+  --host 127.0.0.1 --port 8083 \
+  --cache-path server_cache \
+  --input-root /Users/mt/hamster/3d-inference/server_cache/inputs \
+  --model-dir /Users/mt/hamster/models/Hunyuan3D-Part \
+  --p3-weights models/p3sam.safetensors
+```
+
+内部接口：
+
+- `POST /send`：提交共享目录中的网格路径和推理参数。
+- `GET /status/{uid}`：查询状态与当前阶段。
+- `GET /download/{uid}`：下载主 GLB。
+- `GET /bundle/{uid}`：下载全部产物 ZIP。
+- `POST /unload`：空闲时释放 MLX 模型与缓存。
+- `GET /health`：查询 worker、忙碌状态和模型加载状态。
+
+对外部署时应通过现有 `8080` 持久化队列访问，不要公开 `8083`。队列使用二进制请求体，避免将大网格转换为 Base64：
+
+```bash
+curl -X POST \
+  'http://MAC_IP:8080/submit/part?filename=input.glb&mode=segment' \
+  -H 'Content-Type: model/gltf-binary' \
+  -H "X-API-Key: $INFERENCE_API_KEY" \
+  --data-binary @input.glb
+
+curl -H "X-API-Key: $INFERENCE_API_KEY" \
+  http://MAC_IP:8080/status/TASK_UID
+
+curl -L -H "X-API-Key: $INFERENCE_API_KEY" \
+  http://MAC_IP:8080/download/TASK_UID -o segmented.glb
+
+curl -L -H "X-API-Key: $INFERENCE_API_KEY" \
+  http://MAC_IP:8080/bundle/TASK_UID -o artifacts.zip
+```
+
+`mode=segment` 只加载 P3-SAM；`mode=generate_parts` 会加载完整 X-Part，并可用 query 参数覆盖 `steps`、`resolution`、`surface_points` 等默认值。结果由队列持久化并按部署侧保留策略清理。
+
+## 测试
+
+```bash
+uv run ruff check src scripts tests
+uv run pytest -q
+```
+
+## 已知限制
+
+- 当前主路径未启用论文 connectivity 后处理。
+- 官方公开的是 X-Part light version，论文 full-version 数字只能作为参考。
+- MLX 与 CUDA 的浮点和稀疏算子差异会被 mask 阈值与 NMS 放大，均值接近不代表实例标签等价。
+- X-Part 导出的 part 并不保证全部 watertight。

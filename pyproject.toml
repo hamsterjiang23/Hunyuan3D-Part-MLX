@@ -38,6 +38,11 @@ hunyuan-mlx = [
   "scikit-image>=0.25,<1",
   "scikit-learn>=1.7,<2",
 ]
+service = [
+  "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
+  "uvicorn>=0.35,<1",
+]
 cuda-reference = [
   "addict>=2.4,<3",
   "fpsample>=0.3,<1",

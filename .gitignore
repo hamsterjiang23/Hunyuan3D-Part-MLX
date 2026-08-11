@@ -2,6 +2,7 @@
 __pycache__/
 .pytest_cache/
 .pytest_tmp/
+.pytest-*/
 .upstream/
 .ruff_cache/
 .uv-cache/
@@ -9,3 +10,4 @@ __pycache__/
 output/
 artifacts/
 models/
+server_cache/
