@@ -19,6 +19,8 @@ MLX 神经网络路径不依赖 PyTorch/CUDA；P3-SAM 完整路径使用官方�
 
 完整方法、硬件、CUDA/MLX 数值差异和逐模块误差见 [移植与评测报告](reports/Hunyuan3D-Part-MLX-port-report.md)。
 
+官方 `P3-SAM/demo/assets/1.glb` 的单样本服务验证生成 7 个最终 part；输入、严格官方 FPS 配置、逐 part 面积/连通性和真实预览见 [`reports/p3sam-official-demo-1-service-validation.json`](reports/p3sam-official-demo-1-service-validation.json)。官方 demo 未随附该资产的 CUDA 输出或 GT，因此该记录不宣称 CUDA 精度对齐。
+
 ## 安装
 
 要求 Apple Silicon Mac、Python 3.11/3.12 和足够的统一内存。

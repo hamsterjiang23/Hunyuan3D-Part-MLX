@@ -1,0 +1,101 @@
+{
+  "source": {
+    "repository": "Tencent-Hunyuan/Hunyuan3D-Part",
+    "path": "P3-SAM/demo/assets/1.glb",
+    "sha256": "b57626cf269cb1e5b949586b6b6b87efa552c66d0a45371fed0c9f47db4c3314",
+    "size_bytes": 29140044,
+    "reference_output_available": false,
+    "reference_note": "The released demo directory contains four example input GLBs but no corresponding CUDA segmentation output or ground-truth labels."
+  },
+  "service_task": {
+    "uid": "d614694e-4d46-4bd0-b070-b01b604ceea3",
+    "status": "completed",
+    "backend": "mlx",
+    "mode": "segment",
+    "parameters": {
+      "points": 100000,
+      "prompts": 400,
+      "prompt_batch_size": 8,
+      "seed": 42,
+      "official_fps_start": true,
+      "clean_mesh": true,
+      "connectivity": true,
+      "postprocess": true,
+      "postprocess_threshold": 0.95
+    },
+    "download_url": "/download/d614694e-4d46-4bd0-b070-b01b604ceea3",
+    "bundle_url": "/bundle/d614694e-4d46-4bd0-b070-b01b604ceea3"
+  },
+  "runtime": {
+    "total_seconds": 42.59283945802599,
+    "peak_memory_bytes": 21975800413,
+    "stage_seconds": {
+      "clean_mesh": 0.9352088747546077,
+      "sample_surface": 0.09290754236280918,
+      "extract_features": 3.7915921667590737,
+      "sample_prompts": 0.29252462461590767,
+      "predict_masks": 31.04503749962896,
+      "select_masks": 0.772822791710496,
+      "official_mesh_postprocess": 5.012843457981944
+    }
+  },
+  "diagnostics": {
+    "vertex_count": 249573,
+    "face_count": 499588,
+    "point_count": 100000,
+    "prompt_count": 400,
+    "initial_cluster_count": 176,
+    "stable_cluster_count": 19,
+    "projected_part_count": 8,
+    "connectivity_part_count": 8,
+    "postprocessed_part_count": 7,
+    "uncovered_fraction_before_topology_fill": 0.06729,
+    "unassigned_face_count_final": 0
+  },
+  "parts": [
+    {
+      "label": 9,
+      "face_count": 135682,
+      "area_fraction": 0.3484074879170086,
+      "connected_component_count": 1
+    },
+    {
+      "label": 272,
+      "face_count": 106451,
+      "area_fraction": 0.2090884734016619,
+      "connected_component_count": 2
+    },
+    {
+      "label": 111,
+      "face_count": 100307,
+      "area_fraction": 0.18146238529097516,
+      "connected_component_count": 1
+    },
+    {
+      "label": 18,
+      "face_count": 73227,
+      "area_fraction": 0.09626243267594971,
+      "connected_component_count": 1
+    },
+    {
+      "label": 24,
+      "face_count": 29659,
+      "area_fraction": 0.06530063346395075,
+      "connected_component_count": 1
+    },
+    {
+      "label": 1,
+      "face_count": 28924,
+      "area_fraction": 0.05019033073735042,
+      "connected_component_count": 1
+    },
+    {
+      "label": 0,
+      "face_count": 25338,
+      "area_fraction": 0.049288256513103375,
+      "connected_component_count": 1
+    }
+  ],
+  "preview": "reports/assets/p3sam-official-demo-1-mlx-preview.png",
+  "assessment": "The MLX service produced a complete seven-part partition. Six labels are topologically connected; label 272 covers two disconnected regions, indicating at least one merge in the automatic result."
+}
