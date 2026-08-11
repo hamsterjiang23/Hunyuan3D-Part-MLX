@@ -71,6 +71,8 @@ worker 默认只监听 `127.0.0.1:8083`，输入路径必须位于统一队列�
 
 对外部署时应通过现有 `8080` 持久化队列访问，不要公开 `8083`。队列使用二进制请求体，避免将大网格转换为 Base64：
 
+仓库中的 `deploy/3d-inference/` 保存了本次 Mac 部署使用的队列入口、SQLite 存储层、五服务启动器、API 文档和 Part 协议测试，可覆盖到现有 `3d-inference` 服务目录后使用；启动器中的用户目录和局域网地址需要按目标机器调整。
+
 ```bash
 curl -X POST \
   'http://MAC_IP:8080/submit/part?filename=input.glb&mode=segment' \
