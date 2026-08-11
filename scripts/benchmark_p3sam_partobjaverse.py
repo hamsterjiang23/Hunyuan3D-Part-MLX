@@ -158,6 +158,10 @@ def main() -> None:
                     connectivity=True,
                     postprocess=args.postprocess,
                     postprocess_threshold=args.postprocess_threshold,
+                    progress=lambda stage, seconds, sample_uid=uid: print(
+                        json.dumps({"uid": sample_uid, "stage": stage, "seconds": seconds}),
+                        flush=True,
+                    ),
                 )
             runtime.cuda.synchronize()
             peak_memory = int(runtime.cuda.max_memory_allocated())
@@ -174,6 +178,10 @@ def main() -> None:
                 connectivity=True,
                 postprocess=args.postprocess,
                 postprocess_threshold=args.postprocess_threshold,
+                progress=lambda stage, seconds, sample_uid=uid: print(
+                    json.dumps({"uid": sample_uid, "stage": stage, "seconds": seconds}),
+                    flush=True,
+                ),
             )
             peak_memory = int(runtime.get_peak_memory())
         inference_seconds = time.perf_counter() - started

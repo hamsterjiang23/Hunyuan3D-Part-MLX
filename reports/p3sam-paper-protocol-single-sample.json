@@ -1,0 +1,44 @@
+{
+  "status": "single-sample diagnostic; not a paper reproduction",
+  "uid": "00200996b8f34f55a2dd2f44d316d107",
+  "paper_reported": {
+    "automatic_without_connectivity_miou": 59.88,
+    "gt_prompt_with_connectivity_miou": 81.14,
+    "interactive_miou": 51.23,
+    "source": ".upstream/papers/p3-sam.txt:317-330,419-423,961-970"
+  },
+  "mlx_fp32_automatic": {
+    "projected_instance_miou": 26.22310387,
+    "connectivity_instance_miou": 35.60169117,
+    "full_instance_miou": 37.53932731
+  },
+  "mlx_fp32_paper_described_gt_prompt_reconstruction": {
+    "prompt_count": 120,
+    "projected_instance_miou": 32.753773971631176,
+    "connectivity_instance_miou": 46.59192775633396,
+    "full_instance_miou": 48.12092510618495,
+    "interactive_prompt_miou": 21.088139109610708,
+    "coverage_fraction": 0.67845,
+    "overlap_fraction": 0.44492,
+    "inference_seconds": 13.65265987534076,
+    "peak_memory_bytes": 3527032780,
+    "delta_full_vs_automatic": 10.58159779618495
+  },
+  "mlx_fp32_deployable_centroid_prompt_refinement_rejected": {
+    "full_instance_miou": 31.482913473080554,
+    "delta_full_vs_automatic": -6.056413836919447,
+    "inference_seconds": 35.90526158362627,
+    "reason": "The same fixed sample regressed, so this experimental inference path was removed."
+  },
+  "partial_automatic_benchmark_stopped_by_user": {
+    "completed": 147,
+    "expected": 200,
+    "mean_shape_micro_full_instance_miou": 42.24168257989283,
+    "mean_shape_micro_projected_instance_miou": 36.39097350492917,
+    "mean_shape_micro_connectivity_instance_miou": 41.73541075301317,
+    "mean_inference_seconds": 35.60747762387428,
+    "mean_peak_memory_bytes": 3534578440.1360545,
+    "warning": "Partial, non-random prefix results must not be reported as a 200-sample paper metric."
+  },
+  "conclusion": "The paper's GT-prompt condition materially improves this sample, but the public paper description and released code do not reproduce 81.14. The deployable pseudo-prompt variant regressed and was not retained."
+}

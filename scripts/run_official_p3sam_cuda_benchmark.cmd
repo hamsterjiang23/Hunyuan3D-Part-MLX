@@ -1,5 +1,6 @@
 @echo off
 setlocal
+title Hunyuan3D-Part CUDA benchmark - keep open
 cd /d "%~dp0\.."
 set "OUTPUT=artifacts\official_paper_protocol_cuda_200_float64_bs8"
 if not exist "%OUTPUT%" mkdir "%OUTPUT%"
@@ -13,7 +14,7 @@ set "PYTHONUNBUFFERED=1"
   --upstream .upstream\hunyuan3d-part ^
   --points 100000 ^
   --prompts 400 ^
-  --prompt-batch-size 8 ^
+  --prompt-batch-size 4 ^
   --seed 42 ^
   --official-fps-start ^
   --no-clean-mesh ^
