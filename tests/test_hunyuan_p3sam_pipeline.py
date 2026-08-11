@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import numpy as np
+import trimesh
 
 from split3d.hunyuan.p3sam_pipeline import (
+    MeshSegmentation,
+    SegmentationDiagnostics,
     farthest_point_indices,
     normalize_point_cloud,
+    save_segmentation,
     select_automatic_masks,
 )
 
@@ -81,3 +85,44 @@ def test_automatic_mask_selection_deduplicates_and_assigns_parts() -> None:
     assert point_ids[0] == point_ids[1]
     assert point_ids[2] == point_ids[3]
     assert point_ids[0] != point_ids[2]
+
+
+def test_save_segmentation_converts_textured_full_and_part_meshes_to_colors(tmp_path) -> None:
+    mesh = trimesh.Trimesh(
+        vertices=np.asarray([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], dtype=np.float64),
+        faces=np.asarray([[0, 1, 2], [0, 2, 3]], dtype=np.int64),
+        process=False,
+    )
+    mesh.visual = trimesh.visual.texture.TextureVisuals(
+        uv=np.asarray([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float64)
+    )
+    labels = np.asarray([0, 1], dtype=np.int64)
+    diagnostics = SegmentationDiagnostics(
+        point_count=4,
+        prompt_count=2,
+        initial_cluster_count=2,
+        stable_cluster_count=2,
+        final_part_count=2,
+        uncovered_fraction=0.0,
+        projected_part_count=2,
+        connectivity_part_count=2,
+        postprocessed_part_count=2,
+    )
+    result = MeshSegmentation(
+        face_ids=labels,
+        bboxes=np.zeros((2, 2, 3), dtype=np.float64),
+        diagnostics=diagnostics,
+        stage_seconds={},
+        mesh=mesh,
+        projected_face_ids=labels,
+        connectivity_face_ids=labels,
+    )
+
+    save_segmentation(mesh, result, tmp_path, seed=42)
+
+    paths = [tmp_path / "segmented.glb", *sorted((tmp_path / "parts").glob("*.glb"))]
+    assert len(paths) == 3
+    for path in paths:
+        loaded = trimesh.load(path, force="mesh")
+        assert isinstance(loaded.visual, trimesh.visual.ColorVisuals)
+        assert np.asarray(loaded.visual.face_colors).shape == (len(loaded.faces), 4)

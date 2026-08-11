@@ -436,8 +436,13 @@ def save_segmentation(
     part_manifest = []
     for index, label in enumerate(int(value) for value in np.unique(result.face_ids) if value >= 0):
         face_indices = np.where(result.face_ids == label)[0]
-        part = output_mesh.submesh([face_indices], append=True, repair=False)
-        part.visual.face_colors = np.tile(np.r_[colors[label], 255], (len(part.faces), 1))
+        part_geometry = output_mesh.submesh([face_indices], append=True, repair=False)
+        part = trimesh.Trimesh(
+            vertices=np.asarray(part_geometry.vertices),
+            faces=np.asarray(part_geometry.faces),
+            face_colors=np.tile(np.r_[colors[label], 255], (len(part_geometry.faces), 1)),
+            process=False,
+        )
         filename = f"part_{index:03d}_label_{label}.glb"
         part.export(parts_dir / filename)
         points = np.asarray(output_mesh.vertices)[np.asarray(output_mesh.faces)[face_indices].reshape(-1)]
