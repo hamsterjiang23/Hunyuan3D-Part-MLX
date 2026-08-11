@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-output="artifacts/official_paper_protocol_mlx_200_batch1"
+output="artifacts/official_paper_protocol_mlx_200_float64_batch1"
 mkdir -p "$output"
 
 PYTHONUNBUFFERED=1 .venv/bin/python scripts/benchmark_p3sam_partobjaverse.py \
