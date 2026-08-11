@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -67,6 +68,51 @@ def test_prepare_sonata_input_keeps_float64_until_released_tensor_boundary() -> 
     np.testing.assert_array_equal(np.sort(prepared.grid_coord[:, 0]), np.sort(expected_grid[:, 0]))
     assert prepared.coord.dtype == np.float32
     assert prepared.feat.dtype == np.float32
+
+
+@pytest.mark.skipif(importlib.util.find_spec("torch") is None, reason="PyTorch reference is optional")
+def test_prepare_sonata_input_matches_released_transform() -> None:
+    root = Path(__file__).parents[1]
+    sonata_root = root / ".upstream" / "hunyuan3d-part" / "XPart" / "partgen" / "models" / "sonata"
+    if not sonata_root.exists():
+        pytest.skip("pinned Hunyuan3D-Part source is unavailable")
+
+    package_name = "split3d_test_sonata_reference"
+    package = types.ModuleType(package_name)
+    package.__path__ = [str(sonata_root)]  # type: ignore[attr-defined]
+    sys.modules[package_name] = package
+    try:
+        for name in ("registry", "transform"):
+            module_name = f"{package_name}.{name}"
+            spec = importlib.util.spec_from_file_location(module_name, sonata_root / f"{name}.py")
+            assert spec is not None and spec.loader is not None
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+        released = sys.modules[f"{package_name}.transform"]
+
+        rng = np.random.default_rng(2026)
+        points = rng.normal(size=(2048, 3)).astype(np.float64)
+        points[0] = [-1.0, -1.0, 0.0]
+        points[1] = [1.0, 1.0, 1.0]
+        points[2] = [0.005 - 1e-10, 0.0, 0.5]
+        normals = rng.normal(size=points.shape).astype(np.float64)
+        data = {
+            "coord": points.copy(),
+            "normal": normals.copy(),
+            "color": np.ones_like(points),
+            "batch": np.zeros(len(points), dtype=np.int64),
+        }
+        np.random.seed(42)
+        expected = released.default()(data)
+        actual = prepare_sonata_input(points, normals, seed=42)
+
+        for key in ("coord", "grid_coord", "color", "feat", "inverse"):
+            np.testing.assert_array_equal(expected[key].numpy(), getattr(actual, key))
+    finally:
+        sys.modules.pop(f"{package_name}.transform", None)
+        sys.modules.pop(f"{package_name}.registry", None)
+        sys.modules.pop(package_name, None)
 
 
 def test_serialization_round_trip_indices() -> None:
